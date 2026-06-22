@@ -30,6 +30,7 @@ type CycleAction =
   | { type: 'RESUME_AUTO' }
   | { type: 'ITEM_ADDED'; item: BillboardItem }
   | { type: 'ITEM_DELETED'; id: string }
+  | { type: 'JUMP_TO'; index: number }
 
 function reducer(state: CycleState, action: CycleAction): CycleState {
   const { phase } = state
@@ -166,6 +167,21 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
         ...state,
         items: filtered,
         activeIndex: newIndex,
+      }
+    }
+
+    case 'JUMP_TO': {
+      if (state.items.length === 0) return state
+      const idx = ((action.index % state.items.length) + state.items.length) % state.items.length
+      return {
+        ...state,
+        activeIndex: idx,
+        phase: {
+          phase: 'loading',
+          query: state.items[idx]!.query,
+          tokenCount: 0,
+          streamText: '',
+        },
       }
     }
 
@@ -379,6 +395,11 @@ export function useCycle({
     dispatch({ type: 'ITEM_DELETED', id })
   }, [])
 
+  const jumpTo = useCallback((index: number) => {
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
+    dispatch({ type: 'JUMP_TO', index })
+  }, [])
+
   return {
     phase: state.phase,
     activeIndex: state.activeIndex,
@@ -386,6 +407,7 @@ export function useCycle({
     submitManualQuery,
     addItem,
     deleteItem,
+    jumpTo,
     lastManualChatIdRef,
   }
 }

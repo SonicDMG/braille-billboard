@@ -6,6 +6,8 @@ interface HeaderProps {
   playlistTotal: number
   musicEnabled: boolean
   onMusicToggle: () => void
+  onPrev?: () => void
+  onNext?: () => void
   fontSize: number
 }
 
@@ -15,6 +17,8 @@ export function Header({
   playlistTotal,
   musicEnabled,
   onMusicToggle,
+  onPrev,
+  onNext,
   fontSize,
 }: HeaderProps) {
   return (
@@ -42,11 +46,56 @@ export function Header({
         {query || '⠀'}
       </div>
 
-      {/* Right side: cycle position + music toggle */}
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexShrink: 0 }}>
-        <span style={{ color: '#555555' }}>
-          ⠿ {playlistIndex + 1}/{playlistTotal}
-        </span>
+      {/* Right side: prev/next + cycle position + music toggle */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+        {(onPrev || onNext) && (
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <button
+              onClick={onPrev}
+              disabled={!onPrev || playlistTotal <= 1}
+              title="Previous billboard"
+              style={{
+                background: 'none',
+                border: '1px solid #2a2a2a',
+                color: (!onPrev || playlistTotal <= 1) ? '#2a2a2a' : '#555555',
+                fontFamily: "'Courier New', monospace",
+                fontSize: `${fontSize}px`,
+                cursor: (!onPrev || playlistTotal <= 1) ? 'default' : 'pointer',
+                padding: '2px 6px',
+                borderRadius: 2,
+                lineHeight: 1,
+              }}
+            >
+              ‹
+            </button>
+            <span style={{ color: '#555555', minWidth: '3ch', textAlign: 'center' }}>
+              ⠿ {playlistIndex + 1}/{playlistTotal}
+            </span>
+            <button
+              onClick={onNext}
+              disabled={!onNext || playlistTotal <= 1}
+              title="Next billboard"
+              style={{
+                background: 'none',
+                border: '1px solid #2a2a2a',
+                color: (!onNext || playlistTotal <= 1) ? '#2a2a2a' : '#555555',
+                fontFamily: "'Courier New', monospace",
+                fontSize: `${fontSize}px`,
+                cursor: (!onNext || playlistTotal <= 1) ? 'default' : 'pointer',
+                padding: '2px 6px',
+                borderRadius: 2,
+                lineHeight: 1,
+              }}
+            >
+              ›
+            </button>
+          </div>
+        )}
+        {!(onPrev || onNext) && (
+          <span style={{ color: '#555555' }}>
+            ⠿ {playlistIndex + 1}/{playlistTotal}
+          </span>
+        )}
         <button
           onClick={onMusicToggle}
           style={{

@@ -58,7 +58,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     }
   }, [musicEnabled, play])
 
-  const { phase, activeIndex, items, submitManualQuery, addItem, deleteItem, lastManualChatIdRef } = useCycle({
+  const { phase, activeIndex, items, submitManualQuery, addItem, deleteItem, jumpTo, lastManualChatIdRef } = useCycle({
     dwellSeconds: billboardConfig.dwellSeconds,
     resumeAfterManualSeconds: billboardConfig.resumeAfterManualSeconds,
     onVisualizationReady: handleVisualizationReady,
@@ -256,6 +256,8 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
           playlistTotal={items.length}
           musicEnabled={musicEnabled}
           onMusicToggle={toggleMusic}
+          onPrev={items.length > 1 ? () => jumpTo(activeIndex - 1) : undefined}
+          onNext={items.length > 1 ? () => jumpTo(activeIndex + 1) : undefined}
           fontSize={fontSize}
         />
 
