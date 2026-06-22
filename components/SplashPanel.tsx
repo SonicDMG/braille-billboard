@@ -133,18 +133,6 @@ export function SplashPanel({
         </button>
       )}
 
-      {/* Braille sine wave — fills available space */}
-      <div
-        style={{
-          flex: 1,
-          overflow: 'hidden',
-          opacity: waveOpacity,
-          transition: 'opacity 0.6s',
-        }}
-      >
-        <BrailleDisplay frame={frame} fontSize={fontSize} color="#ffffff" />
-      </div>
-
       {/* Query input */}
       {showInput && (
         <form
@@ -153,7 +141,8 @@ export function SplashPanel({
             display: 'flex',
             flexDirection: 'column',
             gap: fontSize * 0.5,
-            paddingTop: mode === 'splash' ? fontSize : fontSize * 0.5,
+            paddingTop: mode === 'splash' ? fontSize : mode === 'split' ? fontSize * 2 : fontSize * 0.5,
+            paddingBottom: mode === 'split' ? fontSize * 0.5 : 0,
             flexShrink: 0,
           }}
         >
@@ -201,6 +190,18 @@ export function SplashPanel({
           </div>
         </form>
       )}
+
+      {/* Braille sine wave — fills available space */}
+      <div
+        style={{
+          flex: 1,
+          overflow: 'hidden',
+          opacity: waveOpacity,
+          transition: 'opacity 0.6s',
+        }}
+      >
+        <BrailleDisplay frame={frame} fontSize={fontSize} color="#ffffff" />
+      </div>
 
       {/* Billboard list — only shown in split mode when there are items */}
       {mode === 'split' && billboardList && (
