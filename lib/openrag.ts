@@ -15,49 +15,49 @@ function getClient(): OpenRAGClient {
 }
 
 /**
- * Wraps the user's query with JSON schema instructions so the model always
- * returns a structured response regardless of the server's system prompt.
+ * Builds the message sent to the OpenRAG agent.
  *
- * Includes an explicit no-data path so the parser can surface a clean error
- * instead of receiving unparseable prose.
+ * Every response is billboard copy — text-only, punchy, written like a roadside
+ * sign. No charts, no data tables, no analyst prose.
  */
 function buildVisualizationMessage(query: string): string {
-  return `${query}
+  return `You are writing copy for a large roadside billboard. Every word must earn its place.
+Be direct. Be memorable. Be funny when the subject is funny. Be stark when it is not.
+Write like a copywriter, not an analyst. No hedging. No jargon. No filler.
 
-Using only information found in the documents, respond with a single JSON object — no prose, no markdown code fences, no explanation before or after.
+QUERY: ${query}
 
-If the answer contains numeric data (counts, amounts, percentages, durations, rankings, etc.), use this shape:
-
-{
-  "found": true,
-  "chartType": "line" | "bar" | "sparkline",
-  "title": "<concise title, max 60 chars>",
-  "summary": "<one sentence describing the key insight>",
-  "dataPoints": [{ "label": "<string>", "value": <number> }, ...],
-  "unit": "<optional unit string, e.g. $ % ms — omit if not applicable>",
-  "musicPrompt": "<natural-language ambient music description, e.g. warm uplifting jazz piano ascending 8 seconds>"
-}
-
-If the answer is descriptive, conceptual, or has no numeric data but the documents DO contain relevant information, use this shape instead:
+Search the documents for the answer. Respond with this exact JSON — no prose, no markdown, nothing outside the JSON:
 
 {
   "found": true,
   "chartType": "text",
-  "title": "<concise title, max 60 chars>",
-  "summary": "<one sentence describing the key insight>",
-  "words": "<the answer as plain prose, 2–5 sentences, no special characters>",
+  "title": "<the billboard headline — 2 to 6 words, punchy, printed 10 feet tall>",
+  "summary": "<one sentence. The kind a driver reads at 60mph and remembers.>",
+  "words": "<the full billboard copy — 2 to 4 short sentences. Plain words. Punchy voice. No bullet points. No special characters.>",
   "dataPoints": [],
-  "musicPrompt": "<natural-language ambient music description>"
+  "musicPrompt": "<10 words or fewer describing background music, e.g. low ominous strings in a dark hall>"
 }
 
-Only respond with found:false if the documents contain NO relevant information at all:
-{ "found": false, "reason": "<brief explanation>" }
+Example — query: "tell me about Berserker Korg"
+{
+  "found": true,
+  "chartType": "text",
+  "title": "FURY BUILT. DEVASTATING BLOWS.",
+  "summary": "35 HP. One bad mood. Do not approach.",
+  "words": "Korg does not strategize. He attacks. Reckless Attack hits hard. Rage Strike hits harder. When he is done, the floor is wet.",
+  "dataPoints": [],
+  "musicPrompt": "heavy war drums building to a crash"
+}
+
+If the documents contain NO relevant information:
+{ "found": false, "reason": "<one sentence>" }
 
 Rules:
-- chartType: "line" for trends, "bar" for category comparisons, "sparkline" for compact overview, "text" for prose answers
-- dataPoints values must be plain numbers — no currency symbols, no commas
-- musicPrompt must describe coherent ambient audio; default to warm resolved tones
-- Output the JSON object and nothing else`
+- title: short headline. Could be shouted from a moving vehicle.
+- summary: one sentence. State the fact, land the joke, or make the threat.
+- words: write it for a billboard, not a report. If a word does not pull its weight, cut it.
+- Output JSON only`
 }
 
 /**

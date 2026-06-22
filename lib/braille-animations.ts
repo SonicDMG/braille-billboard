@@ -3,7 +3,7 @@
  * Each is a generator function — call .next() on each tick to get the next frame string.
  */
 
-import { BrailleCanvas } from './braille'
+import { BrailleCanvas, drawTextFrame } from './braille'
 
 // ---------------------------------------------------------------------------
 // Spinner
@@ -167,3 +167,86 @@ export function dwellProgressBar(progress: number, cols: number): string {
   }
   return bar
 }
+
+// ---------------------------------------------------------------------------
+// Streaming fly-in
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders the current value of `textRef.value` as a braille text frame and
+ * animates each column flying in from the right, decelerating into its resting
+ * position. New columns are launched as text arrives; settled columns stay put.
+ *
+ * Uses the same mutable-ref pattern as `busyFrames` so the caller can update
+ * `textRef.value` on every React render without restarting the generator.
+ *
+ * Tick at ~40 ms for smooth motion.
+ */
+export function* flyInFrames(
+  cols: number,
+  rows: number,
+  textRef: { value: string },
+): Generator<string> {
+  // Per-column state: current x-offset (float). NaN = not yet launched.
+  const offsets = new Float32Array(cols).fill(NaN)
+
+  const EASE_K        = 0.18  // fraction of remaining gap closed per tick
+  const LAUNCH_SPREAD = 6     // extra rightward offset for the outermost column
+  const EPSILON       = 0.5   // snap-to-target threshold
+
+  // Blank braille character
+  const BLANK = '⠀'
+
+  while (true) {
+    // 1. Render current text into a target braille canvas
+    const canvas = new BrailleCanvas(cols, rows)
+    if (textRef.value) {
+      drawTextFrame(canvas, textRef.value)
+    }
+    const targetLines = canvas.frame().split('\n')
+
+    // 2. Determine which columns have any non-blank content in the target frame
+    for (let c = 0; c < cols; c++) {
+      const hasContent = targetLines.some(line => line[c] !== undefined && line[c] !== BLANK)
+
+      if (hasContent && isNaN(offsets[c]!)) {
+        // Column has content for the first time — launch from off-screen right.
+        // Rightmost columns fly from further away for a cascade feel.
+        const cascade = (LAUNCH_SPREAD * (cols - c)) / cols
+        offsets[c] = cols + cascade
+      }
+    }
+
+    // 3. Ease each in-flight column toward its rest position
+    for (let c = 0; c < cols; c++) {
+      if (isNaN(offsets[c]!)) continue
+      const remaining = offsets[c]! - c
+      if (remaining > EPSILON) {
+        offsets[c] = offsets[c]! - remaining * EASE_K
+      } else {
+        offsets[c] = c  // snapped
+      }
+    }
+
+    // 4. Composite the output frame
+    const outLines: string[] = []
+    for (let r = 0; r < rows; r++) {
+      const targetLine = targetLines[r] ?? ''
+      let line = ''
+      for (let c = 0; c < cols; c++) {
+        if (isNaN(offsets[c]!)) {
+          // Not yet launched — blank
+          line += BLANK
+        } else {
+          // Sample the target frame at the current (rounded) offset position
+          const srcCol = Math.min(cols - 1, Math.round(offsets[c]!))
+          line += targetLine[srcCol] ?? BLANK
+        }
+      }
+      outLines.push(line)
+    }
+
+    yield outLines.join('\n')
+  }
+}
+

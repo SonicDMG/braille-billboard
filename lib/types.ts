@@ -23,8 +23,8 @@ export interface VisualizationData {
 export type BillboardPhase =
   | { phase: 'setup' }
   | { phase: 'idle' }
-  | { phase: 'loading'; query: string; tokenCount: number }
+  | { phase: 'loading'; query: string; tokenCount: number; streamText: string }
   | { phase: 'transitioning'; next: VisualizationData }
   | { phase: 'displaying'; data: VisualizationData; dwellRemaining: number }
   | { phase: 'error'; message: string; query: string }
-  | { phase: 'manual'; query: string; tokenCount: number }
+  | { phase: 'manual'; query: string; tokenCount: number; streamText: string }

@@ -15,7 +15,7 @@ type CycleAction =
   | { type: 'START' }
   | { type: 'QUERY_COMPLETE'; data: VisualizationData }
   | { type: 'QUERY_ERROR'; message: string }
-  | { type: 'TOKEN_DELTA'; count: number }
+  | { type: 'TOKEN_DELTA'; count: number; text: string }
   | { type: 'TRANSITION_DONE' }
   | { type: 'DWELL_TICK' }
   | { type: 'DWELL_DONE' }
@@ -36,6 +36,7 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
           phase: 'loading',
           query: state.playlist[state.playlistIndex]!,
           tokenCount: 0,
+          streamText: '',
         },
       }
 
@@ -60,7 +61,7 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       if (phase.phase !== 'loading' && phase.phase !== 'manual') return state
       return {
         ...state,
-        phase: { ...phase, tokenCount: action.count },
+        phase: { ...phase, tokenCount: action.count, streamText: phase.streamText + action.text },
       }
     }
 
@@ -90,14 +91,14 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       return {
         ...state,
         playlistIndex: nextIndex,
-        phase: { phase: 'loading', query: state.playlist[nextIndex]!, tokenCount: 0 },
+        phase: { phase: 'loading', query: state.playlist[nextIndex]!, tokenCount: 0, streamText: '' },
       }
     }
 
     case 'MANUAL_QUERY':
       return {
         ...state,
-        phase: { phase: 'manual', query: action.query, tokenCount: 0 },
+        phase: { phase: 'manual', query: action.query, tokenCount: 0, streamText: '' },
       }
 
     case 'MANUAL_COMPLETE':
@@ -125,7 +126,7 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       return {
         ...state,
         playlistIndex: nextIndex,
-        phase: { phase: 'loading', query: state.playlist[nextIndex]!, tokenCount: 0 },
+        phase: { phase: 'loading', query: state.playlist[nextIndex]!, tokenCount: 0, streamText: '' },
       }
     }
 
@@ -254,7 +255,7 @@ export function useCycle({
 
             if (msg.type === 'delta') {
               tokenCount += msg.text.length
-              dispatch({ type: 'TOKEN_DELTA', count: tokenCount })
+              dispatch({ type: 'TOKEN_DELTA', count: tokenCount, text: msg.text })
             } else if (msg.type === 'result') {
               if (cancelled) return
               cacheRef.current.set(cacheKey, msg.data)

@@ -1,13 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { BrailleCanvas, drawLineChart, drawBarChart, drawSparkline, drawTextFrame } from '@/lib/braille'
-import {
-  spinnerFrames,
-  wipeOutFrames,
-  wipeInFrames,
-} from '@/lib/braille-animations'
-import { BrailleDisplay } from './BrailleDisplay'
+import { DotMatrixDisplay } from './DotMatrixDisplay'
 import { Header } from './Header'
 import { Footer } from './Footer'
 import { SplashPanel } from './SplashPanel'
@@ -31,47 +25,18 @@ interface BillboardProps {
  */
 type Layout = 'splash' | 'split' | 'full'
 
-function renderVisualization(data: VisualizationData, cols: number, rows: number): string {
-  const canvas = new BrailleCanvas(cols, rows)
-
-  switch (data.chartType) {
-    case 'line':
-      drawLineChart(canvas, data.dataPoints.map(d => d.value))
-      break
-    case 'bar':
-      drawBarChart(canvas, data.dataPoints)
-      break
-    case 'sparkline':
-      drawSparkline(canvas, data.dataPoints.map(d => d.value), Math.floor(rows / 2))
-      break
-    case 'text':
-      drawTextFrame(canvas, data.words ?? data.summary)
-      break
-  }
-  return canvas.frame()
-}
-
 export function Billboard({ missingEnvVars }: BillboardProps) {
   const fontSize = billboardConfig.fontSize
 
-  // Right panel container ref — so useBrailleResize measures only that panel
+  // Right panel container ref — for cols used by footer progress bar
   const rightPanelRef = useRef<HTMLDivElement>(null)
-  const { cols, rows } = useBrailleResize(fontSize, 2, 2, rightPanelRef as React.RefObject<HTMLElement | null>)
+  const { cols } = useBrailleResize(fontSize, 2, 2, rightPanelRef as React.RefObject<HTMLElement | null>)
 
   const { play, stop } = useAudio()
   const { musicEnabled, toggle: toggleMusic } = useMusicToggle(stop)
 
   // Layout state machine
   const [layout, setLayout] = useState<Layout>('splash')
-
-  const [frame, setFrame] = useState<string>('')
-  const [title, setTitle] = useState<string>('')
-  const animRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const currentFrameRef = useRef<string>('')
-
-  const clearAnim = useCallback(() => {
-    if (animRef.current) { clearInterval(animRef.current); animRef.current = null }
-  }, [])
 
   // Handle music when a new visualization is ready
   const handleVisualizationReady = useCallback(async (data: VisualizationData) => {
@@ -106,8 +71,12 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     }
   }, [phase.phase, layout])
 
-  // Keyboard shortcut: Escape collapses to split (if full) or back to splash (not useful once started)
-  // '/' opens panel if collapsed to full
+  // Stop music on transition
+  useEffect(() => {
+    if (phase.phase === 'transitioning') stop()
+  }, [phase, stop])
+
+  // Keyboard shortcut: Escape collapses to split (if full), '/' opens panel
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -124,81 +93,6 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     return () => window.removeEventListener('keydown', handler)
   }, [layout])
 
-  // Drive animations based on phase (right panel only)
-  useEffect(() => {
-    clearAnim()
-
-    if (phase.phase === 'idle') {
-      // Idle — right panel stays blank; SplashPanel drives its own animation
-
-    } else if (phase.phase === 'loading' || phase.phase === 'manual') {
-      const gen = spinnerFrames()
-      animRef.current = setInterval(() => {
-        const spin = gen.next().value
-        const midRow = Math.floor(rows / 2)
-        const lines = Array.from({ length: rows }, (_, i) => {
-          if (i !== midRow) return '⠀'.repeat(cols)
-          const left = '⠀'.repeat(Math.max(0, Math.floor(cols / 2) - 1))
-          const right = '⠀'.repeat(Math.max(0, cols - Math.floor(cols / 2) - 1))
-          return left + spin + right
-        })
-        setFrame(lines.join('\n'))
-      }, 100)
-
-    } else if (phase.phase === 'transitioning') {
-      const nextVizFrame = renderVisualization(phase.next, cols, rows)
-      setTitle(phase.next.title)
-      const prev = currentFrameRef.current
-
-      const wipeOut = wipeOutFrames(prev || '⠀'.repeat(cols), cols)
-      const wipeIn = wipeInFrames(nextVizFrame, cols)
-
-      let wipingOut = true
-      animRef.current = setInterval(() => {
-        if (wipingOut) {
-          const result = wipeOut.next()
-          if (result.done) {
-            wipingOut = false
-          } else {
-            setFrame(result.value)
-          }
-        } else {
-          const result = wipeIn.next()
-          if (!result.done) {
-            setFrame(result.value)
-          } else {
-            currentFrameRef.current = nextVizFrame
-            setFrame(nextVizFrame)
-            clearAnim()
-          }
-        }
-      }, 20)
-
-    } else if (phase.phase === 'displaying') {
-      const vizFrame = renderVisualization(phase.data, cols, rows)
-      currentFrameRef.current = vizFrame
-      setFrame(vizFrame)
-      setTitle(phase.data.title)
-
-    } else if (phase.phase === 'error') {
-      const canvas = new BrailleCanvas(cols, rows)
-      for (let x = 0; x < canvas.dotWidth; x += 4) {
-        for (let y = 0; y < canvas.dotHeight; y += 4) {
-          canvas.set(x, y)
-        }
-      }
-      setFrame(canvas.frame())
-      setTitle('ERROR')
-    }
-
-    return clearAnim
-  }, [phase, cols, rows, clearAnim])
-
-  // Stop music on transition
-  useEffect(() => {
-    if (phase.phase === 'transitioning') stop()
-  }, [phase, stop])
-
   if (missingEnvVars.length > 0) {
     return <SetupScreen missingVars={missingEnvVars} fontSize={fontSize} />
   }
@@ -206,9 +100,9 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const currentQuery =
     phase.phase === 'loading' || phase.phase === 'manual' || phase.phase === 'error'
       ? phase.query
-      : phase.phase === 'displaying'
-      ? phase.data.title
-      : title
+      : phase.phase === 'displaying' || phase.phase === 'transitioning'
+      ? phase.phase === 'displaying' ? phase.data.title : phase.next.title
+      : ''
 
   const summary =
     phase.phase === 'displaying' ? phase.data.summary :
@@ -219,14 +113,19 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const dwellRemaining = phase.phase === 'displaying' ? phase.dwellRemaining : 0
   const dwellTotal = billboardConfig.dwellSeconds
 
-  const isLoading = phase.phase === 'loading' || phase.phase === 'manual' || phase.phase === 'transitioning'
+  const isLoading = phase.phase === 'manual'
 
   // Derive a 0–1 energy signal from the stream token count.
-  // We use a saturating curve: energy approaches 1 as tokenCount approaches
-  // ~400 chars (a typical JSON response). The `1 - e^(-x)` shape means it
-  // rises quickly at first then levels off naturally.
   const tokenCount = (phase.phase === 'loading' || phase.phase === 'manual') ? phase.tokenCount : 0
   const streamEnergy = tokenCount > 0 ? 1 - Math.exp(-tokenCount / 120) : 0
+
+  // What text to show on the dot matrix
+  const isLoadingPhase = phase.phase === 'loading' || phase.phase === 'manual'
+  const dotText =
+    phase.phase === 'displaying' ? (phase.data.words ?? phase.data.summary) :
+    phase.phase === 'transitioning' ? (phase.next.words ?? phase.next.summary) :
+    phase.phase === 'error' ? 'ERROR' :
+    ''
 
   // CSS widths for each panel based on layout
   const leftWidth = layout === 'splash' ? '100%' : layout === 'split' ? '25%' : '0%'
@@ -268,7 +167,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
         />
       </div>
 
-      {/* ── RIGHT PANEL — Billboard ──────────────────────────────────────────── */}
+      {/* ── RIGHT PANEL — Billboard (dot matrix always) ─────────────────────── */}
       <div
         ref={rightPanelRef}
         style={{
@@ -304,6 +203,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
             </button>
           </div>
         )}
+
         <Header
           query={currentQuery}
           playlistIndex={playlistIndex}
@@ -313,39 +213,11 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
           fontSize={fontSize}
         />
 
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: `${fontSize * 0.5}px` }}>
-          {/* For text responses: show braille as a decorative strip + readable prose below */}
-          {phase.phase === 'displaying' && phase.data.chartType === 'text' ? (
-            <>
-              <div style={{ flexShrink: 0, opacity: 0.35, overflow: 'hidden', maxHeight: `${fontSize * 5}px` }}>
-                <BrailleDisplay
-                  frame={frame}
-                  fontSize={fontSize}
-                  color="#ffffff"
-                />
-              </div>
-              <div
-                style={{
-                  flex: 1,
-                  overflow: 'auto',
-                  fontFamily: "'Courier New', monospace",
-                  fontSize: `${fontSize}px`,
-                  color: '#ffffff',
-                  lineHeight: 1.65,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}
-              >
-                {phase.data.words ?? phase.data.summary}
-              </div>
-            </>
-          ) : (
-            <BrailleDisplay
-              frame={frame}
-              fontSize={fontSize}
-              color={phase.phase === 'error' ? '#ff3333' : '#ffffff'}
-            />
-          )}
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <DotMatrixDisplay
+            text={dotText}
+            loading={isLoadingPhase}
+          />
         </div>
 
         <Footer
