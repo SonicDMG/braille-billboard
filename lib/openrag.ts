@@ -36,11 +36,19 @@ Search the documents for the answer. Respond with this exact JSON — no prose, 
   "summary": "<one sentence. The kind a driver reads at 60mph and remembers.>",
   "segments": [
     { "text": "<body copy — 1 to 3 sentences. The facts, the story, the argument.>", "color": { "type": "solid", "hex": "amber" } },
-    { "text": "<tagline — 3 to 7 words. Short. Punchy. Impossible to forget.>",     "color": { "type": "solid", "hex": "white" } }
+    { "text": "<tagline — 3 to 7 words. Short. Punchy. Impossible to forget.>",       "color": { "type": "solid", "hex": "white" } },
+    { "text": "<SUBJECT NAME — the name of the person, product, or entity this billboard is about. 1 to 3 words maximum. This is the brand signature at the bottom of the billboard.>", "color": { "type": "solid", "hex": "gold" } }
   ],
   "dataPoints": [],
   "musicPrompt": "<10 words or fewer describing background music, e.g. low ominous strings in a dark hall>"
 }
+
+SEGMENT RULES:
+- The LAST segment is always the subject name — the entity this billboard is about (a product, person, place, concept).
+  It must be 1 to 3 words. It is the brand signature. It always appears.
+- The FIRST segment is body copy — the facts, the story, the argument. 1 to 3 sentences.
+- The MIDDLE segment (optional) is the tagline — punchy, 3 to 7 words. Use only when it genuinely adds impact.
+- Total segments: 2 (body + subject) or 3 (body + tagline + subject).
 
 COLOR GUIDE — choose the color that serves the copy:
 
@@ -60,8 +68,8 @@ Rainbow — full hue cycle across the display width:
 COLOR RULES:
 - Body copy: use solid warm colors (amber, orange, gold) or thematic colors matching the subject.
 - Taglines: use white, a bold contrasting color, or rainbow for maximum impact.
+- Subject name: use gold, white, or a bright thematic color — it must stand out from the body copy.
 - Be intentional. Pick colors that match the mood of the content.
-- You may use 1 to 3 segments. Use 3 only when a middle beat genuinely adds impact.
 - Every segment text must be plain — no bullet points, no special characters, no markdown.
 
 Example — query: "tell me about Berserker Korg"
@@ -71,8 +79,9 @@ Example — query: "tell me about Berserker Korg"
   "title": "FURY BUILT. DEVASTATING BLOWS.",
   "summary": "35 HP. One bad mood. Do not approach.",
   "segments": [
-    { "text": "Korg does not strategize. He attacks. Reckless Attack hits hard. Rage Strike hits harder.", "color": { "type": "solid", "hex": "amber" } },
-    { "text": "WHEN HE IS DONE, THE FLOOR IS WET.", "color": { "type": "gradient", "from": "red", "to": "orange" } }
+    { "text": "Reckless Attack hits hard. Rage Strike hits harder. He does not stop until the floor is wet.", "color": { "type": "solid", "hex": "amber" } },
+    { "text": "BUILD AGENTS. NOT BOILERPLATE.",                                                              "color": { "type": "gradient", "from": "red", "to": "orange" } },
+    { "text": "BERSERKER KORG",                                                                             "color": { "type": "solid", "hex": "gold" } }
   ],
   "dataPoints": [],
   "musicPrompt": "heavy war drums building to a crash"
@@ -82,15 +91,16 @@ If the documents contain NO relevant information:
 { "found": false, "reason": "<one sentence>" }
 
 WORD LIMITS — the display is physically finite. Respect these hard caps:
-- Body segment (first/middle): 30 words maximum.
-- Tagline segment (last, "high" impact): 8 words maximum.
+- Body segment: 25 words maximum.
+- Tagline segment (middle, optional): 8 words maximum.
+- Subject name segment (last): 3 words maximum.
 - Total across ALL segments combined: 35 words maximum.
 - Count every word before you write the JSON. If you are over, cut — do not compress or hyphenate.
 
 Rules:
 - title: short headline. Could be shouted from a moving vehicle.
 - summary: one sentence. State the fact, land the joke, or make the threat.
-- segments: 1 to 3 blocks. Last block is usually the punchy tagline. Cut every word that does not pull its weight.
+- segments: always end with the subject name. Cut every word that does not pull its weight.
 - Output JSON only`
 }
 

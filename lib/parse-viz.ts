@@ -3,9 +3,10 @@ import type { VisualizationData, ChartType, DataPoint, BillboardSegment, DotColo
 const CHART_TYPES: ChartType[] = ['line', 'bar', 'sparkline', 'text']
 const MAX_DATA_POINTS = 24
 
-// Word budget — mirrors the hard caps in the LLM prompt and the image reference.
-const MAX_WORDS_BODY    = 30   // per non-final segment
-const MAX_WORDS_TAGLINE = 8    // final segment (the punchy closer)
+// Word budget — mirrors the hard caps in the LLM prompt.
+const MAX_WORDS_BODY    = 25   // body segment(s)
+const MAX_WORDS_TAGLINE = 8    // middle tagline segment (optional)
+const MAX_WORDS_SUBJECT = 3    // final subject-name segment
 const MAX_WORDS_TOTAL   = 35   // across all segments combined
 
 /** Truncate to at most `limit` words, appending "…" if cut. */
@@ -140,10 +141,15 @@ function parseSegments(raw: unknown): BillboardSegment[] | null {
   if (result.length === 0) return null
 
   // Apply per-segment word caps.
-  // The last segment is the tagline (tightest budget); all others are body copy.
+  // - Last segment: subject name (≤3 words)
+  // - Second-to-last in a 3-segment response: tagline (≤8 words)
+  // - All others: body copy (≤25 words)
   const capped = result.map((seg, i) => {
     const isLast = i === result.length - 1
-    const limit = isLast && result.length > 1 ? MAX_WORDS_TAGLINE : MAX_WORDS_BODY
+    const isTagline = result.length >= 3 && i === result.length - 2
+    const limit = isLast ? MAX_WORDS_SUBJECT
+      : isTagline ? MAX_WORDS_TAGLINE
+      : MAX_WORDS_BODY
     return { ...seg, text: truncateWords(seg.text, limit) }
   })
 

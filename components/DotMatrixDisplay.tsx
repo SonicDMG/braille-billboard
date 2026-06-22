@@ -60,9 +60,7 @@ const CHAR_W = 5   // dot columns per glyph
 const CHAR_H = 7   // dot rows per glyph
 const GAP    = 1   // dot gap between chars (in dot units)
 
-const DOT_PX  = 5
-const GAP_PX  = 2
-const STEP    = DOT_PX + GAP_PX
+const GAP_PX  = 2  // physical pixels between dots
 
 // Blank dot-rows inserted between segments
 const SEGMENT_GAP_ROWS = 2
@@ -168,13 +166,32 @@ function rgbToGlowCss([r, g, b]: RGB, alpha: number): string {
 interface RenderedLine {
   text: string
   color: DotColor
+  /** Integer scale factor for this line's glyphs (1 = 5×7, 2 = 10×14, etc.) */
+  scale: number
 }
 
-function buildLines(segments: BillboardSegment[], charsPerRow: number): RenderedLine[] {
+/**
+ * Word-wrap segment text into lines given a char width budget that varies by
+ * scale factor. Returns lines tagged with their scale and color.
+ *
+ * @param segments    Billboard segments (each may have a different scale)
+ * @param scales      Per-segment integer scale factor (parallel array to segments)
+ * @param colDotWidth Available dot-columns for the widest scale=1 row
+ */
+function buildLines(
+  segments: BillboardSegment[],
+  scales: number[],
+  colDotWidth: number,
+): RenderedLine[] {
   const lines: RenderedLine[] = []
 
   for (let si = 0; si < segments.length; si++) {
     const seg = segments[si]!
+    const scale = scales[si] ?? 1
+    // At this scale, each char occupies (CHAR_W + GAP) * scale dot-columns
+    const charDotW = (CHAR_W + GAP) * scale
+    const charsPerRow = Math.max(1, Math.floor((colDotWidth + GAP * scale) / charDotW))
+
     const words = seg.text.toUpperCase().split(/\s+/).filter(Boolean)
     let current = ''
 
@@ -185,21 +202,32 @@ function buildLines(segments: BillboardSegment[], charsPerRow: number): Rendered
       } else if (current.length + 1 + w.length <= charsPerRow) {
         current += ' ' + w
       } else {
-        lines.push({ text: current, color: seg.color })
+        lines.push({ text: current, color: seg.color, scale })
         current = w
       }
     }
-    if (current) lines.push({ text: current, color: seg.color })
+    if (current) lines.push({ text: current, color: seg.color, scale })
 
-    // Blank separator rows between segments
+    // Blank separator rows between segments (in 1× dot-row units)
     if (si < segments.length - 1) {
       for (let g = 0; g < SEGMENT_GAP_ROWS; g++) {
-        lines.push({ text: '', color: { type: 'solid', hex: '#000000' } })
+        lines.push({ text: '', color: { type: 'solid', hex: '#000000' }, scale: 1 })
       }
     }
   }
 
   return lines
+}
+
+/**
+ * Total dot-rows consumed by a set of lines (including inter-glyph row gap).
+ */
+function totalDotRows(lines: RenderedLine[]): number {
+  let rows = 0
+  for (const line of lines) {
+    rows += CHAR_H * line.scale + 1  // 1 dot-row gap after each line
+  }
+  return rows
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +242,36 @@ interface LitDot {
   segMaxCol: number
 }
 
+/**
+ * Determine per-segment scale factors so that:
+ *  - The first segment (headline) is as large as possible while keeping all
+ *    content within `maxDotRows` total rows.
+ *  - Subsequent segments share the remaining space at scale=1.
+ * Returns an array of integer scales parallel to `segments`.
+ */
+function computeScales(
+  segments: BillboardSegment[],
+  colDotWidth: number,
+  maxDotRows: number,
+): number[] {
+  if (segments.length === 0) return []
+
+  // Body segments always render at scale=1. Compute how many rows they need.
+  const bodyScales = segments.map(() => 1)
+
+  // Try decreasing headline scales until everything fits
+  for (let headlineScale = 6; headlineScale >= 1; headlineScale--) {
+    const scales = segments.map((_, i) => (i === 0 ? headlineScale : 1))
+    const lines = buildLines(segments, scales, colDotWidth)
+    if (totalDotRows(lines) <= maxDotRows) {
+      return scales
+    }
+  }
+
+  // Fallback: everything at scale=1
+  return bodyScales
+}
+
 function buildLitMap(
   segments: BillboardSegment[],
   cols: number,
@@ -222,40 +280,95 @@ function buildLitMap(
   const lit = new Map<string, LitDot>()
   if (segments.length === 0) return lit
 
-  const charsPerRow = Math.floor((cols * STEP + GAP_PX) / (STEP * (CHAR_W + GAP)))
-  if (charsPerRow <= 0) return lit
+  // dot-column budget
+  const colDotWidth = cols
 
-  const lines = buildLines(segments, charsPerRow)
+  const scales = computeScales(segments, colDotWidth, rows)
+  const lines = buildLines(segments, scales, colDotWidth)
+
+  let rowCursor = 0
 
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li]!
-    if (!line.text) continue
+    if (!line.text) {
+      rowCursor += CHAR_H * line.scale + 1
+      continue
+    }
+
+    const scale = line.scale
+    const glyphH = CHAR_H * scale
+    const glyphW = CHAR_W * scale
+    const charStep = (CHAR_W + GAP) * scale
 
     // Compute the dot-column span of the entire line for gradient purposes
     const lineCharCount = line.text.length
     const segMinCol = 0
-    const segMaxCol = lineCharCount * (CHAR_W + GAP) - GAP - 1  // last pixel col of last glyph
+    const segMaxCol = lineCharCount * charStep - GAP * scale - 1
 
-    const rowBase = li * (CHAR_H + 1)
     for (let ci = 0; ci < line.text.length; ci++) {
       const glyph = FONT[line.text[ci]!] ?? FONT[' ']!
-      const colBase = ci * (CHAR_W + GAP)
+      const colBase = ci * charStep
+
       for (let r = 0; r < CHAR_H; r++) {
         const bits = glyph[r]!
         for (let c = 0; c < CHAR_W; c++) {
           if (bits & (1 << (CHAR_W - 1 - c))) {
-            const dr = rowBase + r
-            const dc = colBase + c
-            if (dr < rows && dc < cols) {
-              lit.set(`${dr},${dc}`, { color: line.color, segMinCol, segMaxCol })
+            // Each source dot maps to a scale×scale block of display dots
+            for (let sr = 0; sr < scale; sr++) {
+              for (let sc = 0; sc < scale; sc++) {
+                const dr = rowCursor + r * scale + sr
+                const dc = colBase + c * scale + sc
+                if (dr < rows && dc < cols) {
+                  lit.set(`${dr},${dc}`, { color: line.color, segMinCol, segMaxCol })
+                }
+              }
             }
           }
         }
       }
     }
+
+    rowCursor += glyphH + 1
   }
 
   return lit
+}
+
+// ---------------------------------------------------------------------------
+// Compute the best uniform dot size (DOT_PX) to fill the canvas
+// ---------------------------------------------------------------------------
+
+/**
+ * Given the canvas pixel dimensions and the billboard segments, compute the
+ * largest integer DOT_PX such that all content fits.
+ *
+ * Strategy:
+ *  1. For each candidate DOT_PX (from large to small), derive step = DOT_PX + GAP_PX.
+ *  2. Compute dot-grid dimensions (cols, rows).
+ *  3. Compute the scales and total rows needed; accept if content fits.
+ */
+function computeDotPx(
+  canvasW: number,
+  canvasH: number,
+  segments: BillboardSegment[],
+): number {
+  const MIN_DOT = 3
+  const MAX_DOT = 18
+
+  for (let dotPx = MAX_DOT; dotPx >= MIN_DOT; dotPx--) {
+    const step = dotPx + GAP_PX
+    const cols = Math.floor((canvasW + GAP_PX) / step)
+    const rows = Math.floor((canvasH + GAP_PX) / step)
+    if (cols <= 0 || rows <= 0) continue
+
+    if (segments.length === 0) return dotPx  // loading/text — any size works
+
+    const scales = computeScales(segments, cols, rows)
+    const lines = buildLines(segments, scales, cols)
+    if (totalDotRows(lines) <= rows) return dotPx
+  }
+
+  return MIN_DOT
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +407,18 @@ export function DotMatrixDisplay({ segments, text = '', loading = false }: DotMa
     const d = dims
     if (!canvas || !d) return
 
+    const effectiveSegments: BillboardSegment[] = loading
+      ? []
+      : segments && segments.length > 0
+        ? segments
+        : text
+          ? [{ text, color: { type: 'solid', hex: '#ff6600' } }]
+          : []
+
+    // Pick the largest dot size that fits all content
+    const DOT_PX = loading ? 5 : computeDotPx(d.w, d.h, effectiveSegments)
+    const STEP = DOT_PX + GAP_PX
+
     const cols = Math.floor((d.w + GAP_PX) / STEP)
     const rows = Math.floor((d.h + GAP_PX) / STEP)
     if (cols <= 0 || rows <= 0) return
@@ -307,14 +432,6 @@ export function DotMatrixDisplay({ segments, text = '', loading = false }: DotMa
     }
 
     ctx.clearRect(0, 0, d.w, d.h)
-
-    const effectiveSegments: BillboardSegment[] = loading
-      ? []
-      : segments && segments.length > 0
-        ? segments
-        : text
-          ? [{ text, color: { type: 'solid', hex: '#ff6600' } }]
-          : []
 
     const litMap = loading
       ? new Map<string, LitDot>()
