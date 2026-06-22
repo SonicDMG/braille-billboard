@@ -5,6 +5,55 @@ export interface DataPoint {
   value: number
 }
 
+// ---------------------------------------------------------------------------
+// Dot color descriptors
+// ---------------------------------------------------------------------------
+
+/** Solid fill — every dot in the segment is the same color. */
+export interface DotColorSolid {
+  type: 'solid'
+  /** CSS hex string, e.g. "#ff6600". Named colors are resolved in parse-viz. */
+  hex: string
+}
+
+/**
+ * Rainbow — hue cycles continuously across the horizontal dot position
+ * of the entire rendered display, so the rainbow spans the full width
+ * regardless of word boundaries.
+ */
+export interface DotColorRainbow {
+  type: 'rainbow'
+}
+
+/**
+ * Linear gradient — color interpolates from `from` to `to` across the
+ * leftmost to rightmost rendered dot column of this segment.
+ */
+export interface DotColorGradient {
+  type: 'gradient'
+  from: string  // CSS hex
+  to: string    // CSS hex
+}
+
+export type DotColor = DotColorSolid | DotColorRainbow | DotColorGradient
+
+// ---------------------------------------------------------------------------
+// Billboard segment
+// ---------------------------------------------------------------------------
+
+/**
+ * A single block of billboard copy with its own display row(s) and dot color.
+ * Each segment starts on a new row group in the dot-matrix display.
+ */
+export interface BillboardSegment {
+  text: string
+  color: DotColor
+}
+
+// ---------------------------------------------------------------------------
+// Visualization data
+// ---------------------------------------------------------------------------
+
 export interface VisualizationData {
   chartType: ChartType
   title: string
@@ -12,7 +61,13 @@ export interface VisualizationData {
   summary: string
   /** Present for chart types (line/bar/sparkline) */
   dataPoints: DataPoint[]
-  /** Present for chartType "text" — the prose answer rendered as braille */
+  /**
+   * Billboard copy split into 1–3 display segments.
+   * Each segment starts on its own row group and is drawn with its dot color.
+   * Always populated for chartType "text".
+   */
+  segments?: BillboardSegment[]
+  /** Legacy flat copy — kept for backward compat; prefer segments */
   words?: string
   /** Optional unit string, e.g. "$", "%", "ms" */
   unit?: string

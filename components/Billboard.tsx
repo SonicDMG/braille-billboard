@@ -153,12 +153,16 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const tokenCount = (phase.phase === 'loading' || phase.phase === 'manual') ? phase.tokenCount : 0
   const streamEnergy = tokenCount > 0 ? 1 - Math.exp(-tokenCount / 120) : 0
 
-  // What text to show on the dot matrix
+  // What to show on the dot matrix
   const isLoadingPhase = phase.phase === 'loading' || phase.phase === 'manual'
+  const dotSegments =
+    phase.phase === 'displaying' ? phase.data.segments :
+    phase.phase === 'transitioning' ? phase.next.segments :
+    undefined
   const dotText =
-    phase.phase === 'displaying' ? (phase.data.words ?? phase.data.summary) :
-    phase.phase === 'transitioning' ? (phase.next.words ?? phase.next.summary) :
     phase.phase === 'error' ? 'ERROR' :
+    (!dotSegments && phase.phase === 'displaying') ? (phase.data.words ?? phase.data.summary) :
+    (!dotSegments && phase.phase === 'transitioning') ? (phase.next.words ?? phase.next.summary) :
     ''
 
   // CSS widths for each panel based on layout
@@ -257,6 +261,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
 
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <DotMatrixDisplay
+            segments={dotSegments}
             text={dotText}
             loading={isLoadingPhase}
           />
