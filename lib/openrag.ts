@@ -1,4 +1,5 @@
 import { OpenRAGClient } from 'openrag-sdk'
+import type { StreamEvent } from 'openrag-sdk'
 
 let _client: OpenRAGClient | null = null
 
@@ -23,7 +24,9 @@ function getClient(): OpenRAGClient {
 function buildVisualizationMessage(query: string): string {
   return `${query}
 
-Using only information found in the documents, respond with a single JSON object in exactly this shape — no prose, no markdown code fences, no explanation before or after:
+Using only information found in the documents, respond with a single JSON object — no prose, no markdown code fences, no explanation before or after.
+
+If the answer contains numeric data (counts, amounts, percentages, durations, rankings, etc.), use this shape:
 
 {
   "found": true,
@@ -35,44 +38,38 @@ Using only information found in the documents, respond with a single JSON object
   "musicPrompt": "<natural-language ambient music description, e.g. warm uplifting jazz piano ascending 8 seconds>"
 }
 
-If the documents do not contain relevant data to answer this question, respond with exactly:
-{ "found": false, "reason": "<brief explanation of what was missing>" }
+If the answer is descriptive, conceptual, or has no numeric data but the documents DO contain relevant information, use this shape instead:
+
+{
+  "found": true,
+  "chartType": "text",
+  "title": "<concise title, max 60 chars>",
+  "summary": "<one sentence describing the key insight>",
+  "words": "<the answer as plain prose, 2–5 sentences, no special characters>",
+  "dataPoints": [],
+  "musicPrompt": "<natural-language ambient music description>"
+}
+
+Only respond with found:false if the documents contain NO relevant information at all:
+{ "found": false, "reason": "<brief explanation>" }
 
 Rules:
-- chartType: use "line" for time-series or trends, "bar" for category comparisons, "sparkline" for a compact overview
+- chartType: "line" for trends, "bar" for category comparisons, "sparkline" for compact overview, "text" for prose answers
 - dataPoints values must be plain numbers — no currency symbols, no commas
-- musicPrompt must describe coherent, musical ambient audio; default to warm resolved tones; only use tension if the data strongly warrants it
+- musicPrompt must describe coherent ambient audio; default to warm resolved tones
 - Output the JSON object and nothing else`
 }
 
 /**
- * Send a visualization query to OpenRAG and return the raw model reply string.
- * The caller is responsible for parsing the response via parse-viz.ts.
+ * Stream a visualization query to OpenRAG.
+ *
+ * Returns the AsyncIterable<StreamEvent> from the SDK directly.
+ * Pattern mirrors killrctx: await the connection setup, then the caller
+ * drains events with `for await`. The SDK's ChatStream handles cleanup.
  */
-export async function queryForVisualization(query: string): Promise<string> {
+export function streamForVisualization(query: string): Promise<AsyncIterable<StreamEvent>> {
   const client = getClient()
   const message = buildVisualizationMessage(query)
-
-  console.log('[openrag] → query:', query)
-  console.log('[openrag] → full message length:', message.length)
-
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('OpenRAG request timed out after 30s')), 30_000)
-  )
-
-  const request = client.chat.create({
-    message,
-    stream: false,
-  })
-
-  const response = await Promise.race([request, timeout])
-
-  console.log('[openrag] ← raw response:', response.response)
-  if (response.sources?.length) {
-    console.log('[openrag] ← sources:', response.sources.map(s => s.filename))
-  } else {
-    console.log('[openrag] ← no sources returned')
-  }
-
-  return response.response
+  console.log('[openrag] → streaming query:', query)
+  return client.chat.stream({ message })
 }

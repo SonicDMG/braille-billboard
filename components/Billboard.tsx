@@ -1,17 +1,16 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { BrailleCanvas, drawLineChart, drawBarChart, drawSparkline } from '@/lib/braille'
+import { BrailleCanvas, drawLineChart, drawBarChart, drawSparkline, drawTextFrame } from '@/lib/braille'
 import {
   spinnerFrames,
-  idleFrames,
   wipeOutFrames,
   wipeInFrames,
 } from '@/lib/braille-animations'
 import { BrailleDisplay } from './BrailleDisplay'
 import { Header } from './Header'
 import { Footer } from './Footer'
-import { ManualQuery } from './ManualQuery'
+import { SplashPanel } from './SplashPanel'
 import { SetupScreen } from './SetupScreen'
 import { useCycle } from '@/hooks/useCycle'
 import { useBrailleResize } from '@/hooks/useBrailleResize'
@@ -20,25 +19,33 @@ import { useMusicToggle } from '@/hooks/useMusicToggle'
 import type { VisualizationData } from '@/lib/types'
 import { billboardConfig } from '@/billboard.config'
 
-const REQUIRED_ENV = ['OPENRAG_BASE_URL', 'OPENRAG_API_KEY', 'ELEVENLABS_API_KEY']
-
 interface BillboardProps {
   missingEnvVars: string[]
 }
 
+/**
+ * Layout states:
+ *  'splash' — left panel fills 100%, right panel is hidden (initial state)
+ *  'split'  — left panel ~25%, right panel ~75%
+ *  'full'   — left panel collapsed to 0, right panel fills 100%
+ */
+type Layout = 'splash' | 'split' | 'full'
+
 function renderVisualization(data: VisualizationData, cols: number, rows: number): string {
   const canvas = new BrailleCanvas(cols, rows)
-  const values = data.dataPoints.map(d => d.value)
 
   switch (data.chartType) {
     case 'line':
-      drawLineChart(canvas, values)
+      drawLineChart(canvas, data.dataPoints.map(d => d.value))
       break
     case 'bar':
       drawBarChart(canvas, data.dataPoints)
       break
     case 'sparkline':
-      drawSparkline(canvas, values, Math.floor(rows / 2))
+      drawSparkline(canvas, data.dataPoints.map(d => d.value), Math.floor(rows / 2))
+      break
+    case 'text':
+      drawTextFrame(canvas, data.words ?? data.summary)
       break
   }
   return canvas.frame()
@@ -46,14 +53,19 @@ function renderVisualization(data: VisualizationData, cols: number, rows: number
 
 export function Billboard({ missingEnvVars }: BillboardProps) {
   const fontSize = billboardConfig.fontSize
-  const { cols, rows } = useBrailleResize(fontSize)
+
+  // Right panel container ref — so useBrailleResize measures only that panel
+  const rightPanelRef = useRef<HTMLDivElement>(null)
+  const { cols, rows } = useBrailleResize(fontSize, 2, 2, rightPanelRef as React.RefObject<HTMLElement | null>)
+
   const { play, stop } = useAudio()
   const { musicEnabled, toggle: toggleMusic } = useMusicToggle(stop)
 
+  // Layout state machine
+  const [layout, setLayout] = useState<Layout>('splash')
+
   const [frame, setFrame] = useState<string>('')
   const [title, setTitle] = useState<string>('')
-  // Open the query input immediately when there's no playlist to auto-run
-  const [showManual, setShowManual] = useState(billboardConfig.playlist.length === 0)
   const animRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const currentFrameRef = useRef<string>('')
 
@@ -87,51 +99,47 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     onVisualizationReady: handleVisualizationReady,
   })
 
-  // Re-open query input when cycle returns to idle with no playlist
+  // When query fires, transition to split layout so the billboard becomes visible
   useEffect(() => {
-    if (phase.phase === 'idle' && billboardConfig.playlist.length === 0) {
-      setShowManual(true)
+    if (phase.phase === 'manual' || phase.phase === 'loading') {
+      if (layout === 'splash') setLayout('split')
     }
-  }, [phase.phase])
+  }, [phase.phase, layout])
 
-  // Keyboard listener for manual query (/)
+  // Keyboard shortcut: Escape collapses to split (if full) or back to splash (not useful once started)
+  // '/' opens panel if collapsed to full
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === '/' && !showManual) {
-        e.preventDefault()
-        setShowManual(true)
+      if (e.key === 'Escape') {
+        if (layout === 'full') setLayout('split')
+      }
+      if (e.key === '/') {
+        if (layout === 'full') {
+          e.preventDefault()
+          setLayout('split')
+        }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [showManual])
+  }, [layout])
 
-  // Drive animations based on phase
+  // Drive animations based on phase (right panel only)
   useEffect(() => {
     clearAnim()
 
     if (phase.phase === 'idle') {
-      const gen = idleFrames(cols, rows)
-      animRef.current = setInterval(() => {
-        setFrame(gen.next().value)
-      }, 50)
+      // Idle — right panel stays blank; SplashPanel drives its own animation
 
     } else if (phase.phase === 'loading' || phase.phase === 'manual') {
-      // Spinner in the centre
       const gen = spinnerFrames()
       animRef.current = setInterval(() => {
         const spin = gen.next().value
-        const canvas = new BrailleCanvas(cols, rows)
-        // Place spinner roughly in centre
-        const cx = Math.floor((canvas.dotWidth) / 2)
-        const cy = Math.floor((canvas.dotHeight) / 2)
-        // We can't place a pre-made char in the canvas, so render a full loading frame
-        void canvas // canvas unused for spinner — we build the frame manually
         const midRow = Math.floor(rows / 2)
         const lines = Array.from({ length: rows }, (_, i) => {
           if (i !== midRow) return '⠀'.repeat(cols)
-          const left = '⠀'.repeat(Math.floor(cols / 2) - 1)
-          const right = '⠀'.repeat(cols - Math.floor(cols / 2) - 1)
+          const left = '⠀'.repeat(Math.max(0, Math.floor(cols / 2) - 1))
+          const right = '⠀'.repeat(Math.max(0, cols - Math.floor(cols / 2) - 1))
           return left + spin + right
         })
         setFrame(lines.join('\n'))
@@ -142,7 +150,6 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
       setTitle(phase.next.title)
       const prev = currentFrameRef.current
 
-      // Wipe out current, then wipe in new
       const wipeOut = wipeOutFrames(prev || '⠀'.repeat(cols), cols)
       const wipeIn = wipeInFrames(nextVizFrame, cols)
 
@@ -174,7 +181,6 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
       setTitle(phase.data.title)
 
     } else if (phase.phase === 'error') {
-      // Show error pattern — a sparse dot grid
       const canvas = new BrailleCanvas(cols, rows)
       for (let x = 0; x < canvas.dotWidth; x += 4) {
         for (let y = 0; y < canvas.dotHeight; y += 4) {
@@ -213,6 +219,20 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const dwellRemaining = phase.phase === 'displaying' ? phase.dwellRemaining : 0
   const dwellTotal = billboardConfig.dwellSeconds
 
+  const isLoading = phase.phase === 'loading' || phase.phase === 'manual' || phase.phase === 'transitioning'
+
+  // Derive a 0–1 energy signal from the stream token count.
+  // We use a saturating curve: energy approaches 1 as tokenCount approaches
+  // ~400 chars (a typical JSON response). The `1 - e^(-x)` shape means it
+  // rises quickly at first then levels off naturally.
+  const tokenCount = (phase.phase === 'loading' || phase.phase === 'manual') ? phase.tokenCount : 0
+  const streamEnergy = tokenCount > 0 ? 1 - Math.exp(-tokenCount / 120) : 0
+
+  // CSS widths for each panel based on layout
+  const leftWidth = layout === 'splash' ? '100%' : layout === 'split' ? '25%' : '0%'
+  const rightWidth = layout === 'splash' ? '0%' : layout === 'split' ? '75%' : '100%'
+  const TRANSITION = 'width 0.55s cubic-bezier(0.4, 0, 0.2, 1)'
+
   return (
     <div
       style={{
@@ -221,45 +241,122 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
         width: '100vw',
         overflow: 'hidden',
         display: 'flex',
-        flexDirection: 'column',
-        padding: `${fontSize}px`,
-        boxSizing: 'border-box',
-        gap: `${fontSize * 0.5}px`,
+        flexDirection: 'row',
       }}
     >
-      <Header
-        query={currentQuery}
-        playlistIndex={playlistIndex}
-        playlistTotal={billboardConfig.playlist.length}
-        musicEnabled={musicEnabled}
-        onMusicToggle={toggleMusic}
-        fontSize={fontSize}
-      />
-
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        <BrailleDisplay
-          frame={frame}
+      {/* ── LEFT PANEL — Splash / query ─────────────────────────────────────── */}
+      <div
+        style={{
+          width: leftWidth,
+          flexShrink: 0,
+          overflow: 'hidden',
+          borderRight: layout !== 'splash' ? '1px solid #1a1a1a' : 'none',
+          transition: TRANSITION,
+          position: 'relative',
+        }}
+      >
+        <SplashPanel
           fontSize={fontSize}
-          color={phase.phase === 'error' ? '#ff3333' : '#ffffff'}
+          onSubmit={submitManualQuery}
+          mode={layout}
+          onToggleCollapse={() => {
+            if (layout === 'split') setLayout('full')
+            else if (layout === 'full') setLayout('split')
+          }}
+          isLoading={isLoading}
+          streamEnergy={streamEnergy}
         />
       </div>
 
-      <Footer
-        summary={summary}
-        dwellRemaining={dwellRemaining}
-        dwellTotal={dwellTotal}
-        cols={cols}
-        fontSize={fontSize}
-      />
-
-      {showManual && (
-        <ManualQuery
-          onSubmit={submitManualQuery}
-          onClose={() => setShowManual(false)}
+      {/* ── RIGHT PANEL — Billboard ──────────────────────────────────────────── */}
+      <div
+        ref={rightPanelRef}
+        style={{
+          width: rightWidth,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: `${fontSize}px`,
+          boxSizing: 'border-box',
+          gap: `${fontSize * 0.5}px`,
+          transition: TRANSITION,
+        }}
+      >
+        {/* When panel is fully collapsed, show a small button to expand it again */}
+        {layout === 'full' && (
+          <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: fontSize * 0.25 }}>
+            <button
+              onClick={() => setLayout('split')}
+              title="Show query panel"
+              style={{
+                background: 'none',
+                border: '1px solid #222222',
+                color: '#444444',
+                fontFamily: "'Courier New', monospace",
+                fontSize: `${fontSize * 0.75}px`,
+                cursor: 'pointer',
+                padding: '2px 8px',
+                borderRadius: 2,
+                letterSpacing: 1,
+              }}
+            >
+              ‹⠿ PANEL
+            </button>
+          </div>
+        )}
+        <Header
+          query={currentQuery}
+          playlistIndex={playlistIndex}
+          playlistTotal={billboardConfig.playlist.length}
+          musicEnabled={musicEnabled}
+          onMusicToggle={toggleMusic}
           fontSize={fontSize}
-          isInitial={phase.phase === 'idle'}
         />
-      )}
+
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: `${fontSize * 0.5}px` }}>
+          {/* For text responses: show braille as a decorative strip + readable prose below */}
+          {phase.phase === 'displaying' && phase.data.chartType === 'text' ? (
+            <>
+              <div style={{ flexShrink: 0, opacity: 0.35, overflow: 'hidden', maxHeight: `${fontSize * 5}px` }}>
+                <BrailleDisplay
+                  frame={frame}
+                  fontSize={fontSize}
+                  color="#ffffff"
+                />
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  overflow: 'auto',
+                  fontFamily: "'Courier New', monospace",
+                  fontSize: `${fontSize}px`,
+                  color: '#ffffff',
+                  lineHeight: 1.65,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {phase.data.words ?? phase.data.summary}
+              </div>
+            </>
+          ) : (
+            <BrailleDisplay
+              frame={frame}
+              fontSize={fontSize}
+              color={phase.phase === 'error' ? '#ff3333' : '#ffffff'}
+            />
+          )}
+        </div>
+
+        <Footer
+          summary={summary}
+          dwellRemaining={dwellRemaining}
+          dwellTotal={dwellTotal}
+          cols={cols}
+          fontSize={fontSize}
+          onAsk={layout === 'full' ? () => setLayout('split') : undefined}
+        />
+      </div>
     </div>
   )
 }

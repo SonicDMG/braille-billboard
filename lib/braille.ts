@@ -190,6 +190,79 @@ export function drawSparkline(
 }
 
 // ---------------------------------------------------------------------------
+// Text renderer
+// ---------------------------------------------------------------------------
+
+/**
+ * Render plain prose text into a braille canvas by word-wrapping at `cols`
+ * characters and printing each character cell directly.
+ *
+ * Each character is mapped to a 2×4 dot cell using a minimal 5×3 pixel font
+ * stored as a bitmask per glyph. Unknown characters fall back to a filled block.
+ *
+ * The result fills the canvas top-to-bottom. Overflow lines are silently
+ * clipped at the canvas boundary.
+ */
+export function drawTextFrame(canvas: BrailleCanvas, text: string): void {
+  const cols = canvas.cols
+  const words = text.split(/\s+/).filter(Boolean)
+
+  // Word-wrap into lines of at most `cols` chars
+  const lines: string[] = []
+  let current = ''
+  for (const word of words) {
+    if (current === '') {
+      current = word.slice(0, cols)
+    } else if (current.length + 1 + word.length <= cols) {
+      current += ' ' + word
+    } else {
+      lines.push(current)
+      current = word.slice(0, cols)
+    }
+  }
+  if (current) lines.push(current)
+
+  // Render each line at a character row using the dot grid
+  // Each character maps to a 2-wide × 4-tall dot region (one cell).
+  // We use a compact 2×3 pixel font (top 3 of 4 dot rows) encoded as a
+  // 6-bit value: bits 5..0 = (col0,row0),(col0,row1),(col0,row2),(col1,row0),(col1,row1),(col1,row2)
+  lines.forEach((line, lineIdx) => {
+    const charRow = lineIdx * 2  // use every 2 char-rows for spacing (1 char height + 1 blank)
+    if (charRow >= canvas.rows) return
+    const yBase = charRow * 4
+
+    for (let ci = 0; ci < line.length && ci < cols; ci++) {
+      const ch = line[ci]!
+      const xBase = ci * 2
+      const glyph = GLYPH_MAP[ch.toLowerCase()] ?? GLYPH_MAP['?'] ?? 0
+      // 6 bits: left column top/mid/bot, right column top/mid/bot
+      for (let row = 0; row < 3; row++) {
+        if (glyph & (1 << (5 - row)))     canvas.set(xBase,     yBase + row)
+        if (glyph & (1 << (2 - row)))     canvas.set(xBase + 1, yBase + row)
+      }
+    }
+  })
+}
+
+// Minimal 2×3 pixel font — 6 bits per glyph (left col top→bot, right col top→bot)
+// Bit layout: bit5=L0, bit4=L1, bit3=L2, bit2=R0, bit1=R1, bit0=R2
+const GLYPH_MAP: Record<string, number> = {
+  'a': 0b011110, 'b': 0b111010, 'c': 0b011010, 'd': 0b111010,
+  'e': 0b111110, 'f': 0b111000, 'g': 0b011110, 'h': 0b101110,
+  'i': 0b111011, 'j': 0b001110, 'k': 0b101110, 'l': 0b100011,
+  'm': 0b111010, 'n': 0b110110, 'o': 0b111110, 'p': 0b111100,
+  'q': 0b111110, 'r': 0b111100, 's': 0b011010, 't': 0b111011,
+  'u': 0b100111, 'v': 0b100111, 'w': 0b101111, 'x': 0b101010,
+  'y': 0b101011, 'z': 0b011010,
+  '0': 0b111110, '1': 0b011011, '2': 0b101110, '3': 0b111010,
+  '4': 0b100111, '5': 0b110010, '6': 0b011110, '7': 0b111001,
+  '8': 0b111110, '9': 0b111010,
+  '.': 0b000001, ',': 0b000001, '!': 0b110001, '?': 0b101000,
+  '-': 0b000100, ':': 0b010001, ';': 0b010001, '(': 0b011010,
+  ')': 0b101001, '/': 0b001100, ' ': 0b000000,
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 

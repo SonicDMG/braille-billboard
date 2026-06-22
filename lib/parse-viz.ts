@@ -1,6 +1,6 @@
 import type { VisualizationData, ChartType, DataPoint } from './types'
 
-const VALID_CHART_TYPES: ChartType[] = ['line', 'bar', 'sparkline']
+const CHART_TYPES: ChartType[] = ['line', 'bar', 'sparkline', 'text']
 const MAX_DATA_POINTS = 24
 
 /**
@@ -18,8 +18,8 @@ export function parseVisualizationData(raw: string): VisualizationData {
     throw new Error(`No data: ${reason}`)
   }
 
-  if (typeof json.chartType !== 'string' || !VALID_CHART_TYPES.includes(json.chartType as ChartType)) {
-    throw new Error(`Invalid chartType: "${json.chartType}". Must be one of: ${VALID_CHART_TYPES.join(', ')}`)
+  if (typeof json.chartType !== 'string' || !CHART_TYPES.includes(json.chartType as ChartType)) {
+    throw new Error(`Invalid chartType: "${json.chartType}". Must be one of: ${CHART_TYPES.join(', ')}`)
   }
   if (typeof json.title !== 'string' || json.title.trim() === '') {
     throw new Error('Missing or empty "title"')
@@ -27,11 +27,30 @@ export function parseVisualizationData(raw: string): VisualizationData {
   if (typeof json.summary !== 'string' || json.summary.trim() === '') {
     throw new Error('Missing or empty "summary"')
   }
-  if (!Array.isArray(json.dataPoints) || json.dataPoints.length === 0) {
-    throw new Error('Missing or empty "dataPoints" array')
-  }
   if (typeof json.musicPrompt !== 'string' || json.musicPrompt.trim() === '') {
     throw new Error('Missing or empty "musicPrompt"')
+  }
+
+  const chartType = json.chartType as ChartType
+
+  if (chartType === 'text') {
+    // Text responses carry prose in "words"; dataPoints may be empty or absent
+    if (typeof json.words !== 'string' || json.words.trim() === '') {
+      throw new Error('chartType "text" requires a non-empty "words" field')
+    }
+    return {
+      chartType: 'text',
+      title: json.title.trim(),
+      summary: json.summary.trim(),
+      dataPoints: [],
+      words: json.words.trim(),
+      musicPrompt: json.musicPrompt.trim(),
+    }
+  }
+
+  // Chart types require dataPoints
+  if (!Array.isArray(json.dataPoints) || json.dataPoints.length === 0) {
+    throw new Error('Missing or empty "dataPoints" array')
   }
 
   const dataPoints: DataPoint[] = (json.dataPoints as unknown[])
@@ -45,7 +64,7 @@ export function parseVisualizationData(raw: string): VisualizationData {
     })
 
   return {
-    chartType: json.chartType as ChartType,
+    chartType,
     title: json.title.trim(),
     summary: json.summary.trim(),
     dataPoints,
@@ -55,20 +74,63 @@ export function parseVisualizationData(raw: string): VisualizationData {
 }
 
 function extractJson(raw: string): Record<string, unknown> {
-  // Try to find a JSON code fence first
+  // Strip markdown code fences if present
   const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/)
   const candidate = fenceMatch ? fenceMatch[1]! : raw
 
-  // Find the outermost { ... } block
-  const start = candidate.indexOf('{')
-  const end = candidate.lastIndexOf('}')
-  if (start === -1 || end === -1 || end <= start) {
+  // The model may emit tool-call JSON before the answer, e.g.:
+  //   {"search_query":"What is OpenRAG"}{"found":true,...}
+  // We scan for every top-level {...} block and return the last one that
+  // contains a "found" key — that is always the answer object.
+  const blocks = extractTopLevelObjects(candidate)
+
+  // Prefer the last block containing a "found" key (the answer object);
+  // fall back to the last block overall so we always try to parse something.
+  const answerBlock =
+    [...blocks].reverse().find(b => b.includes('"found"'))
+    ?? blocks[blocks.length - 1]
+
+  if (!answerBlock) {
     throw new Error('No JSON object found in model response')
   }
 
   try {
-    return JSON.parse(candidate.slice(start, end + 1)) as Record<string, unknown>
+    return JSON.parse(answerBlock) as Record<string, unknown>
   } catch (e) {
     throw new Error(`Failed to parse JSON from model response: ${String(e)}`)
   }
+}
+
+/**
+ * Extract all top-level {...} blocks from a string by tracking brace depth.
+ * Handles nested objects correctly without a full JSON tokeniser.
+ */
+function extractTopLevelObjects(text: string): string[] {
+  const results: string[] = []
+  let depth = 0
+  let start = -1
+  let inString = false
+  let escape = false
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!
+
+    if (escape) { escape = false; continue }
+    if (ch === '\\' && inString) { escape = true; continue }
+    if (ch === '"') { inString = !inString; continue }
+    if (inString) continue
+
+    if (ch === '{') {
+      if (depth === 0) start = i
+      depth++
+    } else if (ch === '}') {
+      depth--
+      if (depth === 0 && start !== -1) {
+        results.push(text.slice(start, i + 1))
+        start = -1
+      }
+    }
+  }
+
+  return results
 }

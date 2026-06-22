@@ -48,6 +48,46 @@ export function* idleFrames(cols: number, rows: number): Generator<string> {
   }
 }
 
+/**
+ * Busy/loading variant of the idle wave.
+ * Accepts a live `energyRef` — a { value: number } box (0–1) that callers
+ * update without restarting the generator. As energy rises the amplitude
+ * grows from a tight baseline up toward a more active range, and the phase
+ * speed scales with it. Tick at ~50ms.
+ */
+export function* busyFrames(
+  cols: number,
+  rows: number,
+  energyRef: { value: number } = { value: 0 },
+): Generator<string> {
+  const canvas = new BrailleCanvas(cols, rows)
+  const dw = canvas.dotWidth
+  const dh = canvas.dotHeight
+  let t = 0
+
+  while (true) {
+    const e = Math.max(0, Math.min(1, energyRef.value))
+    // Amplitude: narrow (dh/14) at rest, expands to (dh/5) at peak energy
+    const amp1 = dh * (1 / 14 + e * (1 / 5 - 1 / 14))
+    const amp2 = dh * (1 / 18 + e * (1 / 8 - 1 / 18))
+    const amp3 = dh * (1 / 22 + e * (1 / 12 - 1 / 22))
+    // Phase speed: 0.18 at rest, up to 0.42 at peak
+    const speed = 0.18 + e * 0.24
+
+    canvas.reset()
+    for (let x = 0; x < dw; x++) {
+      const y1 = Math.round((dh / 2) + amp1 * Math.sin((x / dw) * Math.PI * 8  + t))
+      const y2 = Math.round((dh / 2) + amp2 * Math.sin((x / dw) * Math.PI * 12 - t * 1.3))
+      const y3 = Math.round((dh / 2) + amp3 * Math.sin((x / dw) * Math.PI * 5  + t * 0.9))
+      if (y1 >= 0 && y1 < dh) canvas.set(x, y1)
+      if (y2 >= 0 && y2 < dh) canvas.set(x, y2)
+      if (y3 >= 0 && y3 < dh) canvas.set(x, y3)
+    }
+    yield canvas.frame()
+    t += speed
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Wipe transitions
 // ---------------------------------------------------------------------------

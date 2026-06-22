@@ -15,6 +15,7 @@ type CycleAction =
   | { type: 'START' }
   | { type: 'QUERY_COMPLETE'; data: VisualizationData }
   | { type: 'QUERY_ERROR'; message: string }
+  | { type: 'TOKEN_DELTA'; count: number }
   | { type: 'TRANSITION_DONE' }
   | { type: 'DWELL_TICK' }
   | { type: 'DWELL_DONE' }
@@ -34,6 +35,7 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
         phase: {
           phase: 'loading',
           query: state.playlist[state.playlistIndex]!,
+          tokenCount: 0,
         },
       }
 
@@ -53,6 +55,14 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
           query: phase.phase === 'loading' ? phase.query : '',
         },
       }
+
+    case 'TOKEN_DELTA': {
+      if (phase.phase !== 'loading' && phase.phase !== 'manual') return state
+      return {
+        ...state,
+        phase: { ...phase, tokenCount: action.count },
+      }
+    }
 
     case 'TRANSITION_DONE': {
       if (phase.phase !== 'transitioning') return state
@@ -80,14 +90,14 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       return {
         ...state,
         playlistIndex: nextIndex,
-        phase: { phase: 'loading', query: state.playlist[nextIndex]! },
+        phase: { phase: 'loading', query: state.playlist[nextIndex]!, tokenCount: 0 },
       }
     }
 
     case 'MANUAL_QUERY':
       return {
         ...state,
-        phase: { phase: 'manual', query: action.query },
+        phase: { phase: 'manual', query: action.query, tokenCount: 0 },
       }
 
     case 'MANUAL_COMPLETE':
@@ -115,7 +125,7 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       return {
         ...state,
         playlistIndex: nextIndex,
-        phase: { phase: 'loading', query: state.playlist[nextIndex]! },
+        phase: { phase: 'loading', query: state.playlist[nextIndex]!, tokenCount: 0 },
       }
     }
 
@@ -130,6 +140,12 @@ interface UseCycleOptions {
   resumeAfterManualSeconds: number
   onVisualizationReady?: (data: VisualizationData) => void
 }
+
+// NDJSON line shapes coming from /api/query
+type QueryStreamLine =
+  | { type: 'delta'; text: string }
+  | { type: 'result'; data: VisualizationData }
+  | { type: 'error'; message: string }
 
 export function useCycle({
   playlist,
@@ -147,25 +163,54 @@ export function useCycle({
 
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Query result cache — persists for the lifetime of the hook instance.
+  // Keyed by normalised query string (trimmed, lower-cased).
+  // Prevents re-fetching the same question (playlist cycles, re-asks, StrictMode double-invoke).
+  const cacheRef = useRef<Map<string, VisualizationData>>(new Map())
+
   // Start on mount — only auto-start if the playlist has items.
-  // If empty, stay in idle and wait for the user to submit a manual query.
   useEffect(() => {
     if (playlist.length > 0) {
       dispatch({ type: 'START' })
     }
   }, [playlist.length])
 
-  // Fire RAG query whenever we enter 'loading' or 'manual'
   const { phase } = state
   const onReadyRef = useRef(onVisualizationReady)
   onReadyRef.current = onVisualizationReady
 
-  useEffect(() => {
-    if (phase.phase !== 'loading' && phase.phase !== 'manual') return
-    const query = phase.query
-    const isManual = phase.phase === 'manual'
+  // Track the query currently in-flight so TOKEN_DELTA updates (which change
+  // the phase object reference) don't re-trigger a new fetch.
+  const activeQueryRef = useRef<string | null>(null)
 
+  // Fire RAG query whenever we enter a new 'loading' or 'manual' phase.
+  // We key on phase.phase + phase.query (not the full phase object) so that
+  // TOKEN_DELTA updates — which create a new phase reference with the same
+  // query — do not re-run this effect.
+  const phaseType = phase.phase
+  const phaseQuery = (phase.phase === 'loading' || phase.phase === 'manual') ? phase.query : null
+
+  useEffect(() => {
+    if (phaseType !== 'loading' && phaseType !== 'manual') return
+    if (!phaseQuery) return
+
+    const query = phaseQuery
+    const isManual = phaseType === 'manual'
+    const cacheKey = query.trim().toLowerCase()
+
+    // Already fetching this query — TOKEN_DELTA triggered a re-run, skip.
+    if (activeQueryRef.current === cacheKey) return
+
+    // Cache hit — dispatch immediately, no network call.
+    const cached = cacheRef.current.get(cacheKey)
+    if (cached) {
+      dispatch({ type: isManual ? 'MANUAL_COMPLETE' : 'QUERY_COMPLETE', data: cached })
+      return
+    }
+
+    activeQueryRef.current = cacheKey
     let cancelled = false
+
     void (async () => {
       try {
         const res = await fetch('/api/query', {
@@ -173,22 +218,69 @@ export function useCycle({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query }),
         })
-        const json = await res.json() as { ok: boolean; data?: VisualizationData; error?: string }
-        if (cancelled) return
-        if (!json.ok || !json.data) {
-          dispatch({ type: isManual ? 'MANUAL_ERROR' : 'QUERY_ERROR', message: json.error ?? 'Unknown error' })
-        } else {
-          dispatch({ type: isManual ? 'MANUAL_COMPLETE' : 'QUERY_COMPLETE', data: json.data })
+
+        if (!res.ok || !res.body) {
+          const text = await res.text()
+          dispatch({ type: isManual ? 'MANUAL_ERROR' : 'QUERY_ERROR', message: text || 'Request failed' })
+          return
+        }
+
+        // Read NDJSON stream line by line
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let tokenCount = 0
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (cancelled) { reader.cancel(); return }
+
+          if (value) buffer += decoder.decode(value, { stream: true })
+
+          // Process complete lines
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? '' // keep last incomplete line
+
+          for (const raw of lines) {
+            const line = raw.trim()
+            if (!line) continue
+
+            let msg: QueryStreamLine
+            try {
+              msg = JSON.parse(line) as QueryStreamLine
+            } catch {
+              continue
+            }
+
+            if (msg.type === 'delta') {
+              tokenCount += msg.text.length
+              dispatch({ type: 'TOKEN_DELTA', count: tokenCount })
+            } else if (msg.type === 'result') {
+              if (cancelled) return
+              cacheRef.current.set(cacheKey, msg.data)
+              activeQueryRef.current = null
+              dispatch({ type: isManual ? 'MANUAL_COMPLETE' : 'QUERY_COMPLETE', data: msg.data })
+              return
+            } else if (msg.type === 'error') {
+              if (cancelled) return
+              activeQueryRef.current = null
+              dispatch({ type: isManual ? 'MANUAL_ERROR' : 'QUERY_ERROR', message: msg.message })
+              return
+            }
+          }
+
+          if (done) break
         }
       } catch (e) {
         if (!cancelled) {
+          activeQueryRef.current = null
           dispatch({ type: isManual ? 'MANUAL_ERROR' : 'QUERY_ERROR', message: String(e) })
         }
       }
     })()
 
     return () => { cancelled = true }
-  }, [phase])
+  }, [phaseType, phaseQuery])
 
   // Transition delay — give wipe animation ~1.5s before marking done
   useEffect(() => {
