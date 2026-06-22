@@ -73,3 +73,12 @@ export function streamForVisualization(query: string): Promise<AsyncIterable<Str
   console.log('[openrag] → streaming query:', query)
   return client.chat.stream({ message })
 }
+
+/**
+ * Delete an OpenRAG conversation by chatId.
+ * Returns true if deleted, false if not found.
+ */
+export async function deleteConversation(chatId: string): Promise<boolean> {
+  const client = getClient()
+  return client.chat.delete(chatId)
+}

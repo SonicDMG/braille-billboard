@@ -8,9 +8,9 @@ export const runtime = 'nodejs'
  * POST /api/query
  *
  * Streams NDJSON lines to the client:
- *   {"type":"delta","text":"..."}   — each content token as it arrives
- *   {"type":"result","data":{...}}  — final parsed VisualizationData on success
- *   {"type":"error","message":"…"}  — on any failure
+ *   {"type":"delta","text":"..."}        — each content token as it arrives
+ *   {"type":"result","data":{...},"chatId":"..."} — final parsed VisualizationData + chatId on success
+ *   {"type":"error","message":"…"}       — on any failure
  */
 export async function POST(req: NextRequest) {
   const body = await req.json() as { query?: unknown }
@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
       }
 
       let accumulated = ''
+      let chatId: string | null = null
       try {
         // Await the connection; then drain events — mirrors killrctx pattern.
         const events = await streamForVisualization(query)
@@ -57,8 +58,10 @@ export async function POST(req: NextRequest) {
           if (event.type === 'content') {
             accumulated += event.delta
             send({ type: 'delta', text: event.delta })
+          } else if (event.type === 'done' && event.chatId) {
+            chatId = event.chatId
           }
-          // 'sources' and 'done' silently consumed
+          // 'sources' silently consumed
         }
 
         if (closed) return
@@ -76,7 +79,7 @@ export async function POST(req: NextRequest) {
           return
         }
 
-        send({ type: 'result', data })
+        send({ type: 'result', data, chatId })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         console.error('[/api/query] stream error:', message)

@@ -6,6 +6,7 @@ import { Header } from './Header'
 import { Footer } from './Footer'
 import { SplashPanel } from './SplashPanel'
 import { SetupScreen } from './SetupScreen'
+import { BillboardList } from './BillboardList'
 import { useCycle } from '@/hooks/useCycle'
 import { useBrailleResize } from '@/hooks/useBrailleResize'
 import { useAudio } from '@/hooks/useAudio'
@@ -57,12 +58,31 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     }
   }, [musicEnabled, play])
 
-  const { phase, playlistIndex, submitManualQuery } = useCycle({
-    playlist: billboardConfig.playlist,
+  const { phase, activeIndex, items, submitManualQuery, addItem, deleteItem, lastManualChatIdRef } = useCycle({
     dwellSeconds: billboardConfig.dwellSeconds,
     resumeAfterManualSeconds: billboardConfig.resumeAfterManualSeconds,
     onVisualizationReady: handleVisualizationReady,
   })
+
+  // When a manual query completes (manual → transitioning), add it to the billboard list.
+  // We track the last manual query string so we can pair it with the resulting VisualizationData.
+  const lastManualQueryRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (phase.phase === 'manual') {
+      lastManualQueryRef.current = phase.query
+    }
+  }, [phase])
+
+  useEffect(() => {
+    if (phase.phase === 'transitioning' && lastManualQueryRef.current) {
+      const query = lastManualQueryRef.current
+      lastManualQueryRef.current = null
+      // chatId is populated by useCycle's fetch effect when the result arrives
+      const chatId = lastManualChatIdRef.current
+      lastManualChatIdRef.current = null
+      addItem(query, chatId, phase.next)
+    }
+  }, [phase, addItem, lastManualChatIdRef])
 
   // When query fires, transition to split layout so the billboard becomes visible
   useEffect(() => {
@@ -92,6 +112,20 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [layout])
+
+  // Handle item deletion — fires API to delete OpenRAG conversation, updates list
+  const handleDeleteItem = useCallback(async (id: string, chatId: string | null) => {
+    // Optimistically remove from UI
+    deleteItem(id)
+    // Fire-and-forget OpenRAG deletion
+    if (chatId) {
+      try {
+        await fetch(`/api/conversation/${chatId}`, { method: 'DELETE' })
+      } catch {
+        // silent — item already removed from UI
+      }
+    }
+  }, [deleteItem])
 
   if (missingEnvVars.length > 0) {
     return <SetupScreen missingVars={missingEnvVars} fontSize={fontSize} />
@@ -164,6 +198,14 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
           }}
           isLoading={isLoading}
           streamEnergy={streamEnergy}
+          billboardList={
+            <BillboardList
+              items={items}
+              activeIndex={activeIndex}
+              onDelete={handleDeleteItem}
+              fontSize={fontSize}
+            />
+          }
         />
       </div>
 
@@ -206,8 +248,8 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
 
         <Header
           query={currentQuery}
-          playlistIndex={playlistIndex}
-          playlistTotal={billboardConfig.playlist.length}
+          playlistIndex={activeIndex}
+          playlistTotal={items.length}
           musicEnabled={musicEnabled}
           onMusicToggle={toggleMusic}
           fontSize={fontSize}

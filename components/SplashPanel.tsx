@@ -24,6 +24,8 @@ interface SplashPanelProps {
    * amplitude and speed in real time without restarting the generator.
    */
   streamEnergy: number
+  /** Optional billboard list rendered below the query input in split mode */
+  billboardList?: React.ReactNode
 }
 
 export function SplashPanel({
@@ -33,6 +35,7 @@ export function SplashPanel({
   onToggleCollapse,
   isLoading,
   streamEnergy,
+  billboardList,
 }: SplashPanelProps) {
   const [value, setValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -197,6 +200,20 @@ export function SplashPanel({
             {mode === 'splash' ? 'ENTER to ask' : 'ENTER · ESC to hide panel'}
           </div>
         </form>
+      )}
+
+      {/* Billboard list — only shown in split mode when there are items */}
+      {mode === 'split' && billboardList && (
+        <div
+          style={{
+            marginTop: fontSize * 0.5,
+            flexShrink: 0,
+            overflow: 'hidden',
+            maxHeight: '40%',
+          }}
+        >
+          {billboardList}
+        </div>
       )}
     </div>
   )

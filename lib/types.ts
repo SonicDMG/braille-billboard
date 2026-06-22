@@ -20,6 +20,18 @@ export interface VisualizationData {
   musicPrompt: string
 }
 
+/**
+ * A single item in the user's billboard playlist.
+ * Created when a query completes; chatId enables deletion of the OpenRAG conversation.
+ */
+export interface BillboardItem {
+  id: string
+  query: string
+  /** chatId returned by OpenRAG — null if the stream didn't return one */
+  chatId: string | null
+  data: VisualizationData
+}
+
 export type BillboardPhase =
   | { phase: 'setup' }
   | { phase: 'idle' }

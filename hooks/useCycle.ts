@@ -1,44 +1,55 @@
 'use client'
 
 import { useReducer, useEffect, useRef, useCallback } from 'react'
-import type { BillboardPhase, VisualizationData } from '@/lib/types'
+import type { BillboardPhase, BillboardItem, VisualizationData } from '@/lib/types'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State & actions
+// ─────────────────────────────────────────────────────────────────────────────
 
 interface CycleState {
   phase: BillboardPhase
-  playlistIndex: number
-  playlist: readonly string[]
+  /** Index into items[] currently being displayed / targeted */
+  activeIndex: number
+  items: BillboardItem[]
   dwellSeconds: number
   resumeAfterManualSeconds: number
 }
 
 type CycleAction =
-  | { type: 'START' }
-  | { type: 'QUERY_COMPLETE'; data: VisualizationData }
+  | { type: 'START_NEXT' }
+  | { type: 'QUERY_COMPLETE'; data: VisualizationData; chatId: string | null }
   | { type: 'QUERY_ERROR'; message: string }
   | { type: 'TOKEN_DELTA'; count: number; text: string }
   | { type: 'TRANSITION_DONE' }
   | { type: 'DWELL_TICK' }
   | { type: 'DWELL_DONE' }
   | { type: 'MANUAL_QUERY'; query: string }
-  | { type: 'MANUAL_COMPLETE'; data: VisualizationData }
+  | { type: 'MANUAL_COMPLETE'; data: VisualizationData; chatId: string | null }
   | { type: 'MANUAL_ERROR'; message: string }
   | { type: 'RESUME_AUTO' }
+  | { type: 'ITEM_ADDED'; item: BillboardItem }
+  | { type: 'ITEM_DELETED'; id: string }
 
 function reducer(state: CycleState, action: CycleAction): CycleState {
   const { phase } = state
 
   switch (action.type) {
-    case 'START':
+    case 'START_NEXT': {
       if (phase.phase !== 'idle') return state
+      if (state.items.length === 0) return state
+      const idx = state.activeIndex % state.items.length
       return {
         ...state,
+        activeIndex: idx,
         phase: {
           phase: 'loading',
-          query: state.playlist[state.playlistIndex]!,
+          query: state.items[idx]!.query,
           tokenCount: 0,
           streamText: '',
         },
       }
+    }
 
     case 'QUERY_COMPLETE':
       if (phase.phase !== 'loading') return state
@@ -79,19 +90,24 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
 
     case 'DWELL_TICK': {
       if (phase.phase !== 'displaying') return state
-      const next = phase.dwellRemaining - 1
       return {
         ...state,
-        phase: { ...phase, dwellRemaining: next },
+        phase: { ...phase, dwellRemaining: phase.dwellRemaining - 1 },
       }
     }
 
     case 'DWELL_DONE': {
-      const nextIndex = (state.playlistIndex + 1) % state.playlist.length
+      if (state.items.length === 0) return { ...state, phase: { phase: 'idle' } }
+      const nextIndex = (state.activeIndex + 1) % state.items.length
       return {
         ...state,
-        playlistIndex: nextIndex,
-        phase: { phase: 'loading', query: state.playlist[nextIndex]!, tokenCount: 0, streamText: '' },
+        activeIndex: nextIndex,
+        phase: {
+          phase: 'loading',
+          query: state.items[nextIndex]!.query,
+          tokenCount: 0,
+          streamText: '',
+        },
       }
     }
 
@@ -118,15 +134,38 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       }
 
     case 'RESUME_AUTO': {
-      // If no playlist, return to idle so the user can enter another query
-      if (state.playlist.length === 0) {
+      if (state.items.length === 0) {
         return { ...state, phase: { phase: 'idle' } }
       }
-      const nextIndex = (state.playlistIndex + 1) % state.playlist.length
+      const nextIndex = (state.activeIndex + 1) % state.items.length
       return {
         ...state,
-        playlistIndex: nextIndex,
-        phase: { phase: 'loading', query: state.playlist[nextIndex]!, tokenCount: 0, streamText: '' },
+        activeIndex: nextIndex,
+        phase: {
+          phase: 'loading',
+          query: state.items[nextIndex]!.query,
+          tokenCount: 0,
+          streamText: '',
+        },
+      }
+    }
+
+    case 'ITEM_ADDED':
+      return {
+        ...state,
+        items: [...state.items, action.item],
+      }
+
+    case 'ITEM_DELETED': {
+      const filtered = state.items.filter(it => it.id !== action.id)
+      // Clamp activeIndex if it's now out of range
+      const newIndex = filtered.length === 0
+        ? 0
+        : Math.min(state.activeIndex, filtered.length - 1)
+      return {
+        ...state,
+        items: filtered,
+        activeIndex: newIndex,
       }
     }
 
@@ -135,8 +174,11 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Hook
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface UseCycleOptions {
-  playlist: readonly string[]
   dwellSeconds: number
   resumeAfterManualSeconds: number
   onVisualizationReady?: (data: VisualizationData) => void
@@ -145,52 +187,38 @@ interface UseCycleOptions {
 // NDJSON line shapes coming from /api/query
 type QueryStreamLine =
   | { type: 'delta'; text: string }
-  | { type: 'result'; data: VisualizationData }
+  | { type: 'result'; data: VisualizationData; chatId?: string | null }
   | { type: 'error'; message: string }
 
 export function useCycle({
-  playlist,
   dwellSeconds,
   resumeAfterManualSeconds,
   onVisualizationReady,
 }: UseCycleOptions) {
   const [state, dispatch] = useReducer(reducer, {
     phase: { phase: 'idle' },
-    playlistIndex: 0,
-    playlist,
+    activeIndex: 0,
+    items: [],
     dwellSeconds,
     resumeAfterManualSeconds,
   })
 
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Query result cache — persists for the lifetime of the hook instance.
-  // Keyed by normalised query string (trimmed, lower-cased).
-  // Prevents re-fetching the same question (playlist cycles, re-asks, StrictMode double-invoke).
-  const cacheRef = useRef<Map<string, VisualizationData>>(new Map())
-
-  // Start on mount — only auto-start if the playlist has items.
-  useEffect(() => {
-    if (playlist.length > 0) {
-      dispatch({ type: 'START' })
-    }
-  }, [playlist.length])
+  // Cache: prevents re-fetching the same question across cycles.
+  const cacheRef = useRef<Map<string, { data: VisualizationData; chatId: string | null }>>(new Map())
 
   const { phase } = state
   const onReadyRef = useRef(onVisualizationReady)
   onReadyRef.current = onVisualizationReady
 
-  // Track the query currently in-flight so TOKEN_DELTA updates (which change
-  // the phase object reference) don't re-trigger a new fetch.
+  // Track the query currently in-flight so TOKEN_DELTA updates don't re-trigger a fetch.
   const activeQueryRef = useRef<string | null>(null)
 
-  // Fire RAG query whenever we enter a new 'loading' or 'manual' phase.
-  // We key on phase.phase + phase.query (not the full phase object) so that
-  // TOKEN_DELTA updates — which create a new phase reference with the same
-  // query — do not re-run this effect.
   const phaseType = phase.phase
   const phaseQuery = (phase.phase === 'loading' || phase.phase === 'manual') ? phase.query : null
 
+  // Fire RAG query whenever we enter a new 'loading' or 'manual' phase.
   useEffect(() => {
     if (phaseType !== 'loading' && phaseType !== 'manual') return
     if (!phaseQuery) return
@@ -199,13 +227,15 @@ export function useCycle({
     const isManual = phaseType === 'manual'
     const cacheKey = query.trim().toLowerCase()
 
-    // Already fetching this query — TOKEN_DELTA triggered a re-run, skip.
     if (activeQueryRef.current === cacheKey) return
 
-    // Cache hit — dispatch immediately, no network call.
     const cached = cacheRef.current.get(cacheKey)
     if (cached) {
-      dispatch({ type: isManual ? 'MANUAL_COMPLETE' : 'QUERY_COMPLETE', data: cached })
+      dispatch({
+        type: isManual ? 'MANUAL_COMPLETE' : 'QUERY_COMPLETE',
+        data: cached.data,
+        chatId: cached.chatId,
+      })
       return
     }
 
@@ -226,7 +256,6 @@ export function useCycle({
           return
         }
 
-        // Read NDJSON stream line by line
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
@@ -238,9 +267,8 @@ export function useCycle({
 
           if (value) buffer += decoder.decode(value, { stream: true })
 
-          // Process complete lines
           const lines = buffer.split('\n')
-          buffer = lines.pop() ?? '' // keep last incomplete line
+          buffer = lines.pop() ?? ''
 
           for (const raw of lines) {
             const line = raw.trim()
@@ -258,9 +286,11 @@ export function useCycle({
               dispatch({ type: 'TOKEN_DELTA', count: tokenCount, text: msg.text })
             } else if (msg.type === 'result') {
               if (cancelled) return
-              cacheRef.current.set(cacheKey, msg.data)
+              const chatId = msg.chatId ?? null
+              cacheRef.current.set(cacheKey, { data: msg.data, chatId })
               activeQueryRef.current = null
-              dispatch({ type: isManual ? 'MANUAL_COMPLETE' : 'QUERY_COMPLETE', data: msg.data })
+              if (isManual) lastManualChatIdRef.current = chatId
+              dispatch({ type: isManual ? 'MANUAL_COMPLETE' : 'QUERY_COMPLETE', data: msg.data, chatId })
               return
             } else if (msg.type === 'error') {
               if (cancelled) return
@@ -283,7 +313,7 @@ export function useCycle({
     return () => { cancelled = true }
   }, [phaseType, phaseQuery])
 
-  // Transition delay — give wipe animation ~1.5s before marking done
+  // Transition delay
   useEffect(() => {
     if (phase.phase !== 'transitioning') return
     const t = setTimeout(() => {
@@ -304,7 +334,7 @@ export function useCycle({
     return () => clearInterval(t)
   }, [phase])
 
-  // Auto-resume after manual query
+  // Clear resume timer when leaving 'displaying'
   useEffect(() => {
     if (phase.phase !== 'displaying') {
       if (resumeTimerRef.current) {
@@ -314,6 +344,12 @@ export function useCycle({
     }
   }, [phase])
 
+  // ── Public API ──────────────────────────────────────────────────────────────
+
+  // Set by the fetch effect when a manual query result arrives — allows callers
+  // to read the chatId that came back from OpenRAG for the most recent manual query.
+  const lastManualChatIdRef = useRef<string | null>(null)
+
   const submitManualQuery = useCallback((query: string) => {
     if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
     dispatch({ type: 'MANUAL_QUERY', query })
@@ -322,5 +358,34 @@ export function useCycle({
     }, resumeAfterManualSeconds * 1000)
   }, [resumeAfterManualSeconds])
 
-  return { phase: state.phase, playlistIndex: state.playlistIndex, submitManualQuery }
+  /**
+   * Called when a query completes (manual or auto) and should be added to the
+   * rotating billboard list. The caller provides the query string plus whatever
+   * chatId was returned by the API.
+   */
+  const addItem = useCallback((query: string, chatId: string | null, data: VisualizationData) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const item: BillboardItem = { id, query, chatId, data }
+    dispatch({ type: 'ITEM_ADDED', item })
+    // If we were idle, start cycling immediately
+    dispatch({ type: 'START_NEXT' })
+  }, [])
+
+  /**
+   * Remove a billboard item from the list and optionally delete its OpenRAG
+   * conversation. Deletion is fire-and-forget — UI updates immediately.
+   */
+  const deleteItem = useCallback((id: string) => {
+    dispatch({ type: 'ITEM_DELETED', id })
+  }, [])
+
+  return {
+    phase: state.phase,
+    activeIndex: state.activeIndex,
+    items: state.items,
+    submitManualQuery,
+    addItem,
+    deleteItem,
+    lastManualChatIdRef,
+  }
 }
