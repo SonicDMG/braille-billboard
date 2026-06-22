@@ -33,24 +33,20 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const rightPanelRef = useRef<HTMLDivElement>(null)
   const { cols } = useBrailleResize(fontSize, 2, 2, rightPanelRef as React.RefObject<HTMLElement | null>)
 
-  const { play, stop } = useAudio()
+  // Stable ref so useAudio can call triggerDwellDone before useCycle is wired up.
+  const triggerDwellDoneRef = useRef<(() => void) | null>(null)
+  const { play, stop } = useAudio(() => triggerDwellDoneRef.current?.())
   const { musicEnabled, toggle: toggleMusic } = useMusicToggle(stop)
 
   // Layout state machine
   const [layout, setLayout] = useState<Layout>('splash')
 
-  // Handle music when a new visualization is ready
-  const handleVisualizationReady = useCallback(async (data: VisualizationData) => {
-    if (!musicEnabled) return
+  // Handle music when a new visualization is ready — audio was generated at query time.
+  const handleVisualizationReady = useCallback((_data: VisualizationData, audioB64: string | null) => {
+    if (!musicEnabled || !audioB64) return
     try {
-      const res = await fetch('/api/music', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: data.musicPrompt }),
-      })
-      if (!res.ok) return
-      const buffer = await res.arrayBuffer()
-      const blob = new Blob([buffer], { type: 'audio/mpeg' })
+      const bytes = Uint8Array.from(atob(audioB64), c => c.charCodeAt(0))
+      const blob = new Blob([bytes], { type: 'audio/mpeg' })
       const url = URL.createObjectURL(blob)
       play(url)
     } catch {
@@ -58,11 +54,14 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     }
   }, [musicEnabled, play])
 
-  const { phase, activeIndex, items, submitManualQuery, addItem, deleteItem, jumpTo, lastManualChatIdRef } = useCycle({
+  const { phase, activeIndex, items, submitManualQuery, addItem, deleteItem, jumpTo, triggerDwellDone, lastManualChatIdRef } = useCycle({
     dwellSeconds: billboardConfig.dwellSeconds,
     resumeAfterManualSeconds: billboardConfig.resumeAfterManualSeconds,
     onVisualizationReady: handleVisualizationReady,
   })
+
+  // Keep the ref in sync so the audio onEnded closure always calls the latest version.
+  triggerDwellDoneRef.current = triggerDwellDone
 
   // When a manual query completes (manual → transitioning), add it to the billboard list.
   // We track the last manual query string so we can pair it with the resulting VisualizationData.
@@ -80,7 +79,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
       // chatId is populated by useCycle's fetch effect when the result arrives
       const chatId = lastManualChatIdRef.current
       lastManualChatIdRef.current = null
-      addItem(query, chatId, phase.next)
+      addItem(query, chatId, phase.next, phase.audioB64)
     }
   }, [phase, addItem, lastManualChatIdRef])
 

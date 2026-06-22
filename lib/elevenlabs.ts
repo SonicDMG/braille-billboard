@@ -1,4 +1,4 @@
-const ELEVENLABS_API = 'https://api.elevenlabs.io/v1/sound-generation'
+const ELEVENLABS_API = 'https://api.elevenlabs.io/v1/music'
 
 /**
  * Generate ambient music audio from a natural-language prompt via ElevenLabs.
@@ -10,9 +10,9 @@ export async function generateMusicAudio(prompt: string): Promise<ArrayBuffer> {
   if (!apiKey) throw new Error('ELEVENLABS_API_KEY is not set')
 
   const body = {
-    text: prompt,
-    duration_seconds: 8,
-    prompt_influence: 0.3,
+    prompt,
+    music_length_ms: 30000,
+    force_instrumental: true,
   }
 
   console.log('[elevenlabs] → prompt:', prompt)

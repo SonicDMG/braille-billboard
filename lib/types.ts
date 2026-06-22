@@ -85,13 +85,15 @@ export interface BillboardItem {
   /** chatId returned by OpenRAG — null if the stream didn't return one */
   chatId: string | null
   data: VisualizationData
+  /** Base64-encoded mp3 generated at query time — null if unavailable */
+  audioB64: string | null
 }
 
 export type BillboardPhase =
   | { phase: 'setup' }
   | { phase: 'idle' }
   | { phase: 'loading'; query: string; tokenCount: number; streamText: string }
-  | { phase: 'transitioning'; next: VisualizationData }
+  | { phase: 'transitioning'; next: VisualizationData; audioB64: string | null }
   | { phase: 'displaying'; data: VisualizationData; dwellRemaining: number }
   | { phase: 'error'; message: string; query: string }
   | { phase: 'manual'; query: string; tokenCount: number; streamText: string }

@@ -5,11 +5,15 @@ import { useRef, useCallback } from 'react'
 /**
  * Manages a single HTMLAudioElement with fade-in/out support.
  * All operations are silent on error.
+ *
+ * onEnded — called when the song finishes playing naturally (not when stopped).
  */
-export function useAudio() {
+export function useAudio(onEnded?: () => void) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const blobUrlRef = useRef<string | null>(null)
   const fadeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const onEndedRef = useRef(onEnded)
+  onEndedRef.current = onEnded
 
   const clearFade = useCallback(() => {
     if (fadeTimerRef.current) {
@@ -29,8 +33,11 @@ export function useAudio() {
       }
 
       const audio = new Audio(url)
-      audio.loop = true
+      audio.loop = false
       audio.volume = 0
+      audio.addEventListener('ended', () => {
+        if (audioRef.current === audio) onEndedRef.current?.()
+      }, { once: true })
       audioRef.current = audio
       blobUrlRef.current = url
 
@@ -54,10 +61,12 @@ export function useAudio() {
       const audio = audioRef.current
       if (!audio) return
 
+      // Detach the ended listener before fading out so stop() never triggers onEnded.
+      audioRef.current = null
+
       // Fade out over 1s then pause
       const step = 0.05
       fadeTimerRef.current = setInterval(() => {
-        if (!audio) return clearFade()
         audio.volume = Math.max(0, audio.volume - step)
         if (audio.volume <= 0) {
           clearFade()
@@ -66,7 +75,6 @@ export function useAudio() {
             URL.revokeObjectURL(blobUrlRef.current)
             blobUrlRef.current = null
           }
-          audioRef.current = null
         }
       }, 50)
     } catch {

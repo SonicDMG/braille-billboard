@@ -18,14 +18,14 @@ interface CycleState {
 
 type CycleAction =
   | { type: 'START_NEXT' }
-  | { type: 'QUERY_COMPLETE'; data: VisualizationData; chatId: string | null }
+  | { type: 'QUERY_COMPLETE'; data: VisualizationData; chatId: string | null; audioB64: string | null }
   | { type: 'QUERY_ERROR'; message: string }
   | { type: 'TOKEN_DELTA'; count: number; text: string }
   | { type: 'TRANSITION_DONE' }
   | { type: 'DWELL_TICK' }
   | { type: 'DWELL_DONE' }
   | { type: 'MANUAL_QUERY'; query: string }
-  | { type: 'MANUAL_COMPLETE'; data: VisualizationData; chatId: string | null }
+  | { type: 'MANUAL_COMPLETE'; data: VisualizationData; chatId: string | null; audioB64: string | null }
   | { type: 'MANUAL_ERROR'; message: string }
   | { type: 'RESUME_AUTO' }
   | { type: 'ITEM_ADDED'; item: BillboardItem }
@@ -56,7 +56,7 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       if (phase.phase !== 'loading') return state
       return {
         ...state,
-        phase: { phase: 'transitioning', next: action.data },
+        phase: { phase: 'transitioning', next: action.data, audioB64: action.audioB64 },
       }
 
     case 'QUERY_ERROR':
@@ -121,7 +121,7 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
     case 'MANUAL_COMPLETE':
       return {
         ...state,
-        phase: { phase: 'transitioning', next: action.data },
+        phase: { phase: 'transitioning', next: action.data, audioB64: action.audioB64 },
       }
 
     case 'MANUAL_ERROR':
@@ -197,13 +197,13 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
 interface UseCycleOptions {
   dwellSeconds: number
   resumeAfterManualSeconds: number
-  onVisualizationReady?: (data: VisualizationData) => void
+  onVisualizationReady?: (data: VisualizationData, audioB64: string | null) => void
 }
 
 // NDJSON line shapes coming from /api/query
 type QueryStreamLine =
   | { type: 'delta'; text: string }
-  | { type: 'result'; data: VisualizationData; chatId?: string | null }
+  | { type: 'result'; data: VisualizationData; chatId?: string | null; audioB64?: string | null }
   | { type: 'error'; message: string }
 
 export function useCycle({
@@ -222,7 +222,7 @@ export function useCycle({
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Cache: prevents re-fetching the same question across cycles.
-  const cacheRef = useRef<Map<string, { data: VisualizationData; chatId: string | null }>>(new Map())
+  const cacheRef = useRef<Map<string, { data: VisualizationData; chatId: string | null; audioB64: string | null }>>(new Map())
 
   const { phase } = state
   const onReadyRef = useRef(onVisualizationReady)
@@ -251,6 +251,7 @@ export function useCycle({
         type: isManual ? 'MANUAL_COMPLETE' : 'QUERY_COMPLETE',
         data: cached.data,
         chatId: cached.chatId,
+        audioB64: cached.audioB64,
       })
       return
     }
@@ -303,10 +304,11 @@ export function useCycle({
             } else if (msg.type === 'result') {
               if (cancelled) return
               const chatId = msg.chatId ?? null
-              cacheRef.current.set(cacheKey, { data: msg.data, chatId })
+              const audioB64 = msg.audioB64 ?? null
+              cacheRef.current.set(cacheKey, { data: msg.data, chatId, audioB64 })
               activeQueryRef.current = null
               if (isManual) lastManualChatIdRef.current = chatId
-              dispatch({ type: isManual ? 'MANUAL_COMPLETE' : 'QUERY_COMPLETE', data: msg.data, chatId })
+              dispatch({ type: isManual ? 'MANUAL_COMPLETE' : 'QUERY_COMPLETE', data: msg.data, chatId, audioB64 })
               return
             } else if (msg.type === 'error') {
               if (cancelled) return
@@ -332,23 +334,28 @@ export function useCycle({
   // Transition delay
   useEffect(() => {
     if (phase.phase !== 'transitioning') return
+    const audioB64 = phase.audioB64
     const t = setTimeout(() => {
       dispatch({ type: 'TRANSITION_DONE' })
-      if (onReadyRef.current) onReadyRef.current(phase.next)
+      if (onReadyRef.current) onReadyRef.current(phase.next, audioB64)
     }, 1500)
     return () => clearTimeout(t)
   }, [phase])
 
-  // Dwell countdown
+  // Dwell countdown — only runs when the active item has no audio.
+  // When there IS audio, Billboard drives dwell via triggerDwellDone() on the
+  // song's 'ended' event instead.
+  const activeItemHasAudio = state.items[state.activeIndex]?.audioB64 != null
   useEffect(() => {
     if (phase.phase !== 'displaying') return
+    if (activeItemHasAudio) return
     if (phase.dwellRemaining <= 0) {
       dispatch({ type: 'DWELL_DONE' })
       return
     }
     const t = setInterval(() => dispatch({ type: 'DWELL_TICK' }), 1000)
     return () => clearInterval(t)
-  }, [phase])
+  }, [phase, activeItemHasAudio])
 
   // Clear resume timer when leaving 'displaying'
   useEffect(() => {
@@ -379,9 +386,9 @@ export function useCycle({
    * rotating billboard list. The caller provides the query string plus whatever
    * chatId was returned by the API.
    */
-  const addItem = useCallback((query: string, chatId: string | null, data: VisualizationData) => {
+  const addItem = useCallback((query: string, chatId: string | null, data: VisualizationData, audioB64: string | null) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-    const item: BillboardItem = { id, query, chatId, data }
+    const item: BillboardItem = { id, query, chatId, data, audioB64 }
     dispatch({ type: 'ITEM_ADDED', item })
     // If we were idle, start cycling immediately
     dispatch({ type: 'START_NEXT' })
@@ -400,6 +407,10 @@ export function useCycle({
     dispatch({ type: 'JUMP_TO', index })
   }, [])
 
+  const triggerDwellDone = useCallback(() => {
+    dispatch({ type: 'DWELL_DONE' })
+  }, [])
+
   return {
     phase: state.phase,
     activeIndex: state.activeIndex,
@@ -408,6 +419,7 @@ export function useCycle({
     addItem,
     deleteItem,
     jumpTo,
+    triggerDwellDone,
     lastManualChatIdRef,
   }
 }
