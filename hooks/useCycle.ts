@@ -430,14 +430,25 @@ export function useCycle({
     })
   }, [])
 
+  // Stable ref to current state so deleteItem can read chatId without
+  // being re-created on every state change.
+  const stateRef = useRef(state)
+  stateRef.current = state
+
   /**
    * Remove a billboard item from the list. Dispatches immediately so the UI
    * updates at once, then fires DELETE /api/items/[id] to remove the SQLite row
-   * and clean up the OpenRAG conversation server-side.
+   * and clean up the OpenRAG conversation server-side. Passes chatId in the
+   * request body as a fallback for items whose DB row may not exist.
    */
   const deleteItem = useCallback((id: string) => {
+    const chatId = stateRef.current.items.find(it => it.id === id)?.chatId ?? null
     dispatch({ type: 'ITEM_DELETED', id })
-    void fetch(`/api/items/${id}`, { method: 'DELETE' })
+    void fetch(`/api/items/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId }),
+    })
   }, [])
 
   const jumpTo = useCallback((index: number) => {
