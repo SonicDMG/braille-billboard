@@ -382,14 +382,26 @@ interface DotMatrixDisplayProps {
   text?: string
   /** When true, shows a scanning loading animation instead of text. */
   loading?: boolean
+  /**
+   * Streaming energy 0–1. Updated each token; drives the loading animation's
+   * amplitude and speed without restarting the RAF loop.
+   */
+  streamEnergy?: number
 }
 
-export function DotMatrixDisplay({ segments, text = '', loading = false }: DotMatrixDisplayProps) {
+export function DotMatrixDisplay({ segments, text = '', loading = false, streamEnergy = 0 }: DotMatrixDisplayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
   const scanRef = useRef(0)
   const rafRef = useRef<number | null>(null)
+  // Mutable box so energy can update without restarting the RAF loop
+  const energyRef = useRef(0)
+  energyRef.current = loading ? streamEnergy : 0
+  // Per-column stream state: each column has an independent head position (0–1 of rows)
+  // and a phase offset so they don't all move in lockstep.
+  const streamsRef = useRef<Float32Array | null>(null)
+  const streamPhaseRef = useRef<Float32Array | null>(null)
 
   useLayoutEffect(() => {
     const el = containerRef.current
@@ -437,8 +449,6 @@ export function DotMatrixDisplay({ segments, text = '', loading = false }: DotMa
       ? new Map<string, LitDot>()
       : buildLitMap(effectiveSegments, cols, rows)
 
-    const scan = Math.floor(scanRef.current)
-
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const x = c * STEP
@@ -449,15 +459,62 @@ export function DotMatrixDisplay({ segments, text = '', loading = false }: DotMa
         const litDot = litMap.get(`${r},${c}`)
 
         if (loading) {
-          const dist = Math.abs(c - (scan % cols))
-          const wrapped = Math.min(dist, cols - dist)
-          const brightness = Math.max(0, 1 - wrapped / 3)
+          const e = energyRef.current
+
+          // Lazily init / resize per-column stream state.
+          if (!streamsRef.current || streamsRef.current.length !== cols) {
+            streamsRef.current = new Float32Array(cols)
+            streamPhaseRef.current = new Float32Array(cols)
+            for (let i = 0; i < cols; i++) {
+              // Stagger starting positions so columns don't move in lockstep.
+              // Each stream begins somewhere in the top half, moving downward.
+              streamsRef.current[i] = (i / cols) * (rows * 0.5)
+              streamPhaseRef.current![i] = (i * 1.618033) % 1  // golden ratio spread
+            }
+          }
+
+          // Each stream head falls from row 0 toward the vertical center (rows/2).
+          // At the center it wraps back to row 0 to restart the descent.
+          const headRow = streamsRef.current[c]!
+          const midRow = rows / 2
+
+          // Tail length: tighter at low energy (3 rows), longer at peak (8 rows).
+          const tail = 3 + e * 5
+
+          // Distance from this dot to the stream head, measured along the column.
+          // Positive = behind the head (in the tail); negative = ahead (not yet lit).
+          const dist = headRow - r
+
+          let brightness = 0
+          if (dist >= 0 && dist < tail) {
+            // Head dot is full brightness; tail fades exponentially.
+            brightness = dist < 1 ? 1 : Math.pow(1 - dist / tail, 2.2)
+          }
+
+          // Center-pull: dots closest to the vertical midpoint get a subtle boost
+          // so the display feels like data converging on the center.
+          const centerBoost = 1 - Math.abs(r - midRow) / (rows * 0.6)
+          brightness *= Math.max(0.5, centerBoost)
+          brightness = Math.min(1, brightness)
+
           ctx.beginPath()
           ctx.arc(cx, cy, DOT_PX / 2, 0, Math.PI * 2)
           ctx.fillStyle = brightness > 0
-            ? `rgba(255,${Math.round(60 * brightness)},0,${brightness})`
+            ? `rgba(255,${Math.round(60 * brightness * (0.2 + e * 0.8))},0,${brightness})`
             : DOT_DIM
           ctx.fill()
+
+          // Tight glow only on the head dot — grows with energy
+          if (dist < 1 && e > 0.05) {
+            const glowR = DOT_PX * (1.0 + e * 1.2)
+            const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR)
+            grd.addColorStop(0, `rgba(255,${Math.round(80 * e)},0,${0.5 * e})`)
+            grd.addColorStop(1, 'rgba(255,30,0,0)')
+            ctx.beginPath()
+            ctx.arc(cx, cy, glowR, 0, Math.PI * 2)
+            ctx.fillStyle = grd
+            ctx.fill()
+          }
         } else if (litDot) {
           const rgb = resolveColor(litDot.color, c, cols, litDot.segMinCol, litDot.segMaxCol)
           // Core dot
@@ -493,7 +550,33 @@ export function DotMatrixDisplay({ segments, text = '', loading = false }: DotMa
       let last = 0
       const tick = (ts: number) => {
         if (ts - last > 16) {
-          scanRef.current += 0.8
+          const e = energyRef.current
+          const streams = streamsRef.current
+          const phases = streamPhaseRef.current
+          const canvas = canvasRef.current
+          const d = dims
+          if (streams && phases && canvas && d) {
+            const DOT_PX_l = loading ? 5 : computeDotPx(d.w, d.h, [])
+            const STEP_l = DOT_PX_l + GAP_PX
+            const cols_l = Math.floor((d.w + GAP_PX) / STEP_l)
+            const rows_l = Math.floor((d.h + GAP_PX) / STEP_l)
+            const midRow = rows_l / 2
+
+            for (let c = 0; c < cols_l && c < streams.length; c++) {
+              // Each column falls at a slightly different speed — phase offset
+              // creates a rain-like cascade rather than a uniform wall.
+              // Base speed: 0.18 at rest → 0.55 at peak energy.
+              const speed = (0.18 + e * 0.37) * (0.7 + phases[c]! * 0.6)
+              streams[c] = (streams[c]! + speed)
+
+              // Wrap at the center: head resets to 0 once it passes midRow,
+              // keeping all streams converging toward the midpoint.
+              if (streams[c]! > midRow + 1) {
+                streams[c] = 0
+              }
+            }
+          }
+          scanRef.current += 1
           draw()
           last = ts
         }

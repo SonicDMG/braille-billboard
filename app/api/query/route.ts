@@ -14,8 +14,9 @@ export const runtime = 'nodejs'
  *   {"type":"error","message":"…"}       — on any failure
  */
 export async function POST(req: NextRequest) {
-  const body = await req.json() as { query?: unknown }
+  const body = await req.json() as { query?: unknown; musicEnabled?: unknown }
   const query = typeof body.query === 'string' ? body.query.trim() : ''
+  const musicEnabled = body.musicEnabled !== false
 
   if (!query) {
     return new Response(
@@ -80,9 +81,9 @@ export async function POST(req: NextRequest) {
           return
         }
 
-        // Generate music once — silently skip if ElevenLabs is unavailable.
+        // Generate music once — skip if music is disabled or ElevenLabs is unavailable.
         let audioB64: string | null = null
-        if (process.env.ELEVENLABS_API_KEY && data.musicPrompt) {
+        if (musicEnabled && process.env.ELEVENLABS_API_KEY && data.musicPrompt) {
           try {
             const audioBuf = await generateMusicAudio(data.musicPrompt)
             audioB64 = Buffer.from(audioBuf).toString('base64')

@@ -202,6 +202,8 @@ interface UseCycleOptions {
   dwellSeconds: number
   resumeAfterManualSeconds: number
   onVisualizationReady?: (data: VisualizationData, audioB64: string | null) => void
+  /** When false, the API will skip calling ElevenLabs. */
+  musicEnabled?: boolean
 }
 
 // NDJSON line shapes coming from /api/query
@@ -214,6 +216,7 @@ export function useCycle({
   dwellSeconds,
   resumeAfterManualSeconds,
   onVisualizationReady,
+  musicEnabled = true,
 }: UseCycleOptions) {
   const [state, dispatch] = useReducer(reducer, {
     phase: { phase: 'idle' },
@@ -225,6 +228,9 @@ export function useCycle({
 
   // Cache: prevents re-fetching the same question across cycles.
   const cacheRef = useRef<Map<string, { data: VisualizationData; chatId: string | null; audioB64: string | null }>>(new Map())
+  // Mutable ref so the fetch closure always reads the latest musicEnabled without restarting.
+  const musicEnabledRef = useRef(musicEnabled)
+  musicEnabledRef.current = musicEnabled
 
   // Hydrate playlist from SQLite on first mount.
   // Pre-populate the cache with every restored item so the loading phase
@@ -294,7 +300,7 @@ export function useCycle({
         const res = await fetch('/api/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query }),
+          body: JSON.stringify({ query, musicEnabled: musicEnabledRef.current }),
         })
 
         if (!res.ok || !res.body) {

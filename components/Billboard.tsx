@@ -58,6 +58,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     dwellSeconds: billboardConfig.dwellSeconds,
     resumeAfterManualSeconds: billboardConfig.resumeAfterManualSeconds,
     onVisualizationReady: handleVisualizationReady,
+    musicEnabled,
   })
 
   // Keep the ref in sync so the audio onEnded closure always calls the latest version.
@@ -257,6 +258,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
             segments={dotSegments}
             text={dotText}
             loading={isLoadingPhase}
+            streamEnergy={streamEnergy}
           />
         </div>
 
