@@ -4,8 +4,6 @@ interface HeaderProps {
   query: string
   playlistIndex: number
   playlistTotal: number
-  musicEnabled: boolean
-  onMusicToggle: () => void
   onPrev?: () => void
   onNext?: () => void
   fontSize: number
@@ -15,8 +13,6 @@ export function Header({
   query,
   playlistIndex,
   playlistTotal,
-  musicEnabled,
-  onMusicToggle,
   onPrev,
   onNext,
   fontSize,
@@ -46,7 +42,7 @@ export function Header({
         {query || '⠀'}
       </div>
 
-      {/* Right side: prev/next + cycle position + music toggle */}
+      {/* Right side: prev/next + cycle position */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
         {(onPrev || onNext) && (
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -96,22 +92,6 @@ export function Header({
             ⠿ {playlistIndex + 1}/{playlistTotal}
           </span>
         )}
-        <button
-          onClick={onMusicToggle}
-          style={{
-            background: 'none',
-            border: `1px solid ${musicEnabled ? '#666666' : '#333333'}`,
-            color: musicEnabled ? '#aaaaaa' : '#444444',
-            fontFamily: "'Courier New', monospace",
-            fontSize: `${fontSize}px`,
-            cursor: 'pointer',
-            padding: '2px 8px',
-            borderRadius: 2,
-            letterSpacing: 1,
-          }}
-        >
-          ♪ {musicEnabled ? 'ON' : 'OFF'}
-        </button>
       </div>
     </div>
   )

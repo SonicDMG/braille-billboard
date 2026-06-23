@@ -40,8 +40,7 @@ Search the documents for the answer. Respond with this exact JSON — no prose, 
     { "text": "<SUBJECT NAME — the name of the person, product, or entity this billboard is about. 1 to 3 words maximum. This is the brand signature at the bottom of the billboard.>", "color": { "type": "solid", "hex": "gold" } }
   ],
   "dataPoints": [],
-  "musicPrompt": "<10 words or fewer describing background music, e.g. low ominous strings in a dark hall>",
-  "entranceStyle": "<one of: fly-in | dissolve | sparkle | typewriter — pick what matches the music mood>"
+  "entranceStyle": "<one of: fly-in | dissolve | sparkle | typewriter>"
 }
 
 SEGMENT RULES:
@@ -66,11 +65,11 @@ Rainbow — full hue cycle across the display width:
   { "type": "rainbow" }
   Use sparingly — for celebration, chaos, or when the subject is inherently colorful.
 
-ENTRANCE STYLE GUIDE — choose the style that fits the music and subject mood:
-- fly-in:    fast, urgent, kinetic — matches driving beats, action, breaking news
-- dissolve:  slow, atmospheric — matches ambient, cinematic, orchestral
-- sparkle:   celebratory, electric — matches upbeat, festival, pop, electronic
-- typewriter: deliberate, weighty — matches slow strings, somber, minimal, spoken word
+ENTRANCE STYLE GUIDE — choose the style that fits the subject mood:
+- fly-in:    fast, urgent, kinetic — action, breaking news
+- dissolve:  slow, atmospheric — cinematic, contemplative
+- sparkle:   celebratory, electric — upbeat, festive
+- typewriter: deliberate, weighty — somber, minimal
 
 COLOR RULES:
 - Body copy: use solid warm colors (amber, orange, gold) or thematic colors matching the subject.
@@ -91,7 +90,6 @@ Example — query: "tell me about Berserker Korg"
     { "text": "BERSERKER KORG",                                                                             "color": { "type": "solid", "hex": "gold" } }
   ],
   "dataPoints": [],
-  "musicPrompt": "heavy war drums building to a crash",
   "entranceStyle": "fly-in"
 }
 

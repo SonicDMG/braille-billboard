@@ -201,8 +201,6 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
 interface UseCycleOptions {
   dwellSeconds: number
   resumeAfterManualSeconds: number
-  /** When false, the API will skip calling ElevenLabs. */
-  musicEnabled?: boolean
 }
 
 // NDJSON line shapes coming from /api/query
@@ -214,7 +212,6 @@ type QueryStreamLine =
 export function useCycle({
   dwellSeconds,
   resumeAfterManualSeconds,
-  musicEnabled = true,
 }: UseCycleOptions) {
   const [state, dispatch] = useReducer(reducer, {
     phase: { phase: 'idle' },
@@ -226,9 +223,6 @@ export function useCycle({
 
   // Cache: prevents re-fetching the same question across cycles.
   const cacheRef = useRef<Map<string, { data: VisualizationData; chatId: string | null; audioB64: string | null }>>(new Map())
-  // Mutable ref so the fetch closure always reads the latest musicEnabled without restarting.
-  const musicEnabledRef = useRef(musicEnabled)
-  musicEnabledRef.current = musicEnabled
 
   // Hydrate playlist from SQLite on first mount.
   // Pre-populate the cache with every restored item so the loading phase
@@ -295,7 +289,7 @@ export function useCycle({
         const res = await fetch('/api/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query, musicEnabled: musicEnabledRef.current }),
+          body: JSON.stringify({ query }),
         })
 
         if (!res.ok || !res.body) {
@@ -372,20 +366,16 @@ export function useCycle({
     return () => clearTimeout(t)
   }, [phase])
 
-  // Dwell countdown — only runs when the active item has no audio.
-  // When there IS audio, Billboard drives dwell via triggerDwellDone() on the
-  // song's 'ended' event instead.
-  const activeItemHasAudio = state.items[state.activeIndex]?.audioB64 != null
+  // Dwell countdown
   useEffect(() => {
     if (phase.phase !== 'displaying') return
-    if (activeItemHasAudio) return
     if (phase.dwellRemaining <= 0) {
       dispatch({ type: 'DWELL_DONE' })
       return
     }
     const t = setInterval(() => dispatch({ type: 'DWELL_TICK' }), 1000)
     return () => clearInterval(t)
-  }, [phase, activeItemHasAudio])
+  }, [phase])
 
   // Clear resume timer when leaving 'displaying'
   useEffect(() => {
@@ -459,10 +449,6 @@ export function useCycle({
     dispatch({ type: 'JUMP_TO', index })
   }, [])
 
-  const triggerDwellDone = useCallback(() => {
-    dispatch({ type: 'DWELL_DONE' })
-  }, [])
-
   return {
     phase: state.phase,
     activeIndex: state.activeIndex,
@@ -471,7 +457,6 @@ export function useCycle({
     addItem,
     deleteItem,
     jumpTo,
-    triggerDwellDone,
     lastManualChatIdRef,
   }
 }

@@ -73,9 +73,7 @@ export interface VisualizationData {
   words?: string
   /** Optional unit string, e.g. "$", "%", "ms" */
   unit?: string
-  /** Natural-language music description for ElevenLabs generation */
-  musicPrompt: string
-  /** Entrance animation style chosen by the LLM to match the music mood. */
+  /** Entrance animation style chosen by the LLM. */
   entranceStyle?: EntranceStyle
 }
 

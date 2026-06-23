@@ -196,9 +196,6 @@ export function parseVisualizationData(raw: string): VisualizationData {
   if (typeof json.summary !== 'string' || json.summary.trim() === '') {
     throw new Error('Missing or empty "summary"')
   }
-  if (typeof json.musicPrompt !== 'string' || json.musicPrompt.trim() === '') {
-    throw new Error('Missing or empty "musicPrompt"')
-  }
 
   const chartType = json.chartType as ChartType
 
@@ -220,7 +217,6 @@ export function parseVisualizationData(raw: string): VisualizationData {
       dataPoints: [],
       segments,
       words: segments.map(s => s.text).join(' '),
-      musicPrompt: json.musicPrompt.trim(),
       entranceStyle: parseEntranceStyle(json.entranceStyle),
     }
   }
@@ -245,7 +241,6 @@ export function parseVisualizationData(raw: string): VisualizationData {
     summary: cleanText(json.summary as string),
     dataPoints,
     unit: typeof json.unit === 'string' ? json.unit : undefined,
-    musicPrompt: json.musicPrompt.trim(),
     entranceStyle: parseEntranceStyle(json.entranceStyle),
   }
 }

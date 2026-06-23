@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server'
 import { streamForVisualization } from '@/lib/openrag'
 import { parseVisualizationData } from '@/lib/parse-viz'
-import { generateMusicAudio } from '@/lib/elevenlabs'
 
 export const runtime = 'nodejs'
 
@@ -14,9 +13,8 @@ export const runtime = 'nodejs'
  *   {"type":"error","message":"…"}       — on any failure
  */
 export async function POST(req: NextRequest) {
-  const body = await req.json() as { query?: unknown; musicEnabled?: unknown }
+  const body = await req.json() as { query?: unknown }
   const query = typeof body.query === 'string' ? body.query.trim() : ''
-  const musicEnabled = body.musicEnabled !== false
 
   if (!query) {
     return new Response(
@@ -81,19 +79,7 @@ export async function POST(req: NextRequest) {
           return
         }
 
-        // Generate music once — skip if music is disabled or ElevenLabs is unavailable.
-        let audioB64: string | null = null
-        if (musicEnabled && process.env.ELEVENLABS_API_KEY && data.musicPrompt) {
-          try {
-            const audioBuf = await generateMusicAudio(data.musicPrompt)
-            audioB64 = Buffer.from(audioBuf).toString('base64')
-            console.log('[/api/query] music generated, base64 length:', audioB64.length)
-          } catch (musicErr) {
-            console.warn('[/api/query] music generation failed (skipping):', musicErr instanceof Error ? musicErr.message : String(musicErr))
-          }
-        }
-
-        send({ type: 'result', data, chatId, audioB64 })
+        send({ type: 'result', data, chatId, audioB64: null })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         console.error('[/api/query] stream error:', message)
