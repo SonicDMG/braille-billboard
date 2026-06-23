@@ -219,21 +219,31 @@ export function* sparkleEntranceFrames(opts: EntranceOptions): Generator<AlphaMa
 // ---------------------------------------------------------------------------
 
 /**
- * Dots are revealed left-to-right column by column.
- * 1.5 ticks per column → full reveal in cols * 1.5 ticks ≈ 1 s at 30 ms.
+ * Dots are revealed row by row (one full text line at a time), left-to-right
+ * within each row. Each dot row is fully revealed in a single tick (30 ms),
+ * so the whole segment sweeps through quickly line by line.
  */
 export function* typewriterEntranceFrames(opts: EntranceOptions): Generator<AlphaMap> {
-  const { cols, bounds, litKeys } = opts
-  const TICKS_PER_COL = 1.5
+  const { bounds, litKeys } = opts
   const segKeys = keysInBounds(litKeys, bounds)
+
+  // Collect all distinct rows that have lit dots, sorted top→bottom.
+  const rowSet = new Set<number>()
+  for (const key of segKeys) {
+    rowSet.add(parseInt(key.split(',')[0]!, 10))
+  }
+  const rows = Array.from(rowSet).sort((a, b) => a - b)
+
   let tick = 0
 
   while (true) {
-    const revealedUpToCol = Math.round(tick / TICKS_PER_COL)
+    // One full row is revealed per tick.
+    const revealedUpToRowIdx = tick
     const alpha: AlphaMap = new Map()
     for (const key of segKeys) {
-      const c = parseInt(key.split(',')[1]!, 10)
-      alpha.set(key, c <= revealedUpToCol ? 1 : 0)
+      const r = parseInt(key.split(',')[0]!, 10)
+      const rowIdx = rows.indexOf(r)
+      alpha.set(key, rowIdx <= revealedUpToRowIdx ? 1 : 0)
     }
     tick++
     yield alpha
