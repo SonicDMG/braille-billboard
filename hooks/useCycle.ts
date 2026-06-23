@@ -1,7 +1,8 @@
 'use client'
 
 import { useReducer, useEffect, useRef, useCallback } from 'react'
-import type { BillboardPhase, BillboardItem, VisualizationData } from '@/lib/types'
+import type { BillboardPhase, BillboardItem, VisualizationData, SpriteData } from '@/lib/types'
+import { imageToSprite, spriteMapToData } from '@/lib/image-to-sprite'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State & actions
@@ -32,6 +33,7 @@ type CycleAction =
   | { type: 'ITEM_ADDED'; item: BillboardItem }
   | { type: 'ITEM_DELETED'; id: string }
   | { type: 'JUMP_TO'; index: number }
+  | { type: 'ITEM_SPRITE_SET'; id: string; spriteData: SpriteData | null }
 
 function reducer(state: CycleState, action: CycleAction): CycleState {
   const { phase } = state
@@ -189,6 +191,13 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       }
     }
 
+    case 'ITEM_SPRITE_SET': {
+      const items = state.items.map(it =>
+        it.id === action.id ? { ...it, spriteData: action.spriteData } : it
+      )
+      return { ...state, items }
+    }
+
     default:
       return state
   }
@@ -234,14 +243,16 @@ export function useCycle({
         if (!res.ok) return
         const json = await res.json() as { items: BillboardItem[] }
         if (json.items.length > 0) {
-          for (const item of json.items) {
+          // Ensure spriteData is present (null for items persisted before this feature)
+          const items = json.items.map(it => ({ ...it, spriteData: it.spriteData ?? null }))
+          for (const item of items) {
             cacheRef.current.set(item.query.trim().toLowerCase(), {
               data: item.data,
               chatId: item.chatId,
               audioB64: item.audioB64,
             })
           }
-          dispatch({ type: 'ITEMS_LOADED', items: json.items })
+          dispatch({ type: 'ITEMS_LOADED', items })
           dispatch({ type: 'START_NEXT' })
         }
       } catch {
@@ -408,7 +419,7 @@ export function useCycle({
    */
   const addItem = useCallback((query: string, chatId: string | null, data: VisualizationData, audioB64: string | null) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-    const item: BillboardItem = { id, query, chatId, data, audioB64 }
+    const item: BillboardItem = { id, query, chatId, data, audioB64, spriteData: null }
     dispatch({ type: 'ITEM_ADDED', item })
     // If we were idle, start cycling immediately
     dispatch({ type: 'START_NEXT' })
@@ -449,6 +460,41 @@ export function useCycle({
     dispatch({ type: 'JUMP_TO', index })
   }, [])
 
+  /**
+   * Convert a user-supplied image file to a SpriteMap, attach it to the item
+   * with the given id, and persist it to SQLite via PATCH /api/items/[id].
+   *
+   * The conversion target width (40 dot-columns) is a reasonable default for
+   * a billboard grid; the actual placement is handled by computeSpriteRegion.
+   */
+  const setItemSprite = useCallback(async (id: string, file: File) => {
+    const SPRITE_COLS = 40
+    try {
+      const spriteMap = await imageToSprite(file, SPRITE_COLS)
+      const spriteData = spriteMapToData(spriteMap)
+      dispatch({ type: 'ITEM_SPRITE_SET', id, spriteData })
+      void fetch(`/api/items/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spriteData }),
+      })
+    } catch (err) {
+      console.warn('[useCycle] setItemSprite failed:', err instanceof Error ? err.message : String(err))
+    }
+  }, [])
+
+  /**
+   * Clear the sprite for an item and persist the removal.
+   */
+  const removeItemSprite = useCallback((id: string) => {
+    dispatch({ type: 'ITEM_SPRITE_SET', id, spriteData: null })
+    void fetch(`/api/items/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ spriteData: null }),
+    })
+  }, [])
+
   return {
     phase: state.phase,
     activeIndex: state.activeIndex,
@@ -458,5 +504,7 @@ export function useCycle({
     deleteItem,
     jumpTo,
     lastManualChatIdRef,
+    setItemSprite,
+    removeItemSprite,
   }
 }

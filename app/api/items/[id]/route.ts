@@ -1,8 +1,34 @@
 import { NextRequest } from 'next/server'
-import { deleteItem } from '@/lib/db'
+import { deleteItem, updateItemSprite } from '@/lib/db'
 import { deleteConversation } from '@/lib/openrag'
+import type { SpriteData } from '@/lib/types'
 
 export const runtime = 'nodejs'
+
+/**
+ * PATCH /api/items/[id]
+ *
+ * Updates the sprite_data for an item.
+ *
+ * Request body: { spriteData: Record<string, string> | null }
+ * Response 200: { ok: true }
+ */
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params
+  let spriteData: SpriteData | null = null
+  try {
+    const body = await req.json() as { spriteData?: unknown }
+    if (body.spriteData && typeof body.spriteData === 'object' && !Array.isArray(body.spriteData)) {
+      spriteData = body.spriteData as SpriteData
+    }
+  } catch { /* no body — treat as null (clear) */ }
+
+  updateItemSprite(id, spriteData)
+  return Response.json({ ok: true })
+}
 
 /**
  * DELETE /api/items/[id]

@@ -40,17 +40,60 @@ export interface DotColorGradient {
 export type DotColor = DotColorSolid | DotColorRainbow | DotColorGradient
 
 // ---------------------------------------------------------------------------
-// Billboard segment
+// Sprite map
 // ---------------------------------------------------------------------------
 
 /**
- * A single block of billboard copy with its own display row(s) and dot color.
- * Each segment starts on a new row group in the dot-matrix display.
+ * A sparse dot-color map produced by the image-to-sprite converter.
+ * key = "row,col", value = CSS hex color (e.g. "#ff6600").
+ * Only lit dots are present; absent keys are treated as unlit.
  */
-export interface BillboardSegment {
+export type SpriteMap = Map<string, string>
+
+/**
+ * JSON-serialisable form of SpriteMap for SQLite storage and wire transfer.
+ * Converted to/from Map at the DB/API boundary.
+ */
+export type SpriteData = Record<string, string>
+
+// ---------------------------------------------------------------------------
+// Billboard segments
+// ---------------------------------------------------------------------------
+
+/**
+ * Text segment — a block of billboard copy with its own dot color.
+ * The `type` field is optional for backward compatibility with existing
+ * `{ text, color }` objects; absent type is treated as 'text'.
+ */
+export interface BillboardSegmentText {
+  type?: 'text'
   text: string
   color: DotColor
 }
+
+/**
+ * Sprite segment — a raster image converted to a per-dot color map.
+ * Placed by the whitespace-detection pass in DotMatrixDisplay.
+ */
+export interface BillboardSegmentSprite {
+  type: 'sprite'
+  spriteMap: SpriteMap
+}
+
+/**
+ * Portrait segment — a color-banded approximation generated from palette
+ * colors returned by the LLM for character-sheet queries.
+ */
+export interface BillboardSegmentPortrait {
+  type: 'portrait'
+  /** 1–4 palette colors, rendered as equal-height horizontal bands top-to-bottom. */
+  colors: string[]
+}
+
+export type BillboardSegment =
+  | BillboardSegmentText
+  | BillboardSegmentSprite
+  | BillboardSegmentPortrait
 
 // ---------------------------------------------------------------------------
 // Visualization data
@@ -68,13 +111,19 @@ export interface VisualizationData {
    * Each segment starts on its own row group and is drawn with its dot color.
    * Always populated for chartType "text".
    */
-  segments?: BillboardSegment[]
+  segments?: BillboardSegmentText[]
   /** Legacy flat copy — kept for backward compat; prefer segments */
   words?: string
   /** Optional unit string, e.g. "$", "%", "ms" */
   unit?: string
   /** Entrance animation style chosen by the LLM. */
   entranceStyle?: EntranceStyle
+  /**
+   * Optional palette colors for a portrait approximation block.
+   * Populated by the LLM for character/entity queries.
+   * 1–4 CSS hex strings ordered top-to-bottom.
+   */
+  portraitColors?: string[]
 }
 
 /**
@@ -89,6 +138,11 @@ export interface BillboardItem {
   data: VisualizationData
   /** Base64-encoded mp3 generated at query time — null if unavailable */
   audioB64: string | null
+  /**
+   * Serialised SpriteMap for a user-uploaded logo image.
+   * null when no logo has been uploaded for this item.
+   */
+  spriteData: SpriteData | null
 }
 
 export type BillboardPhase =

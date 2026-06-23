@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { DotMatrixDisplay } from './DotMatrixDisplay'
 import { Header } from './Header'
 import { Footer } from './Footer'
@@ -9,7 +9,8 @@ import { SetupScreen } from './SetupScreen'
 import { BillboardList } from './BillboardList'
 import { useCycle } from '@/hooks/useCycle'
 import { useBrailleResize } from '@/hooks/useBrailleResize'
-import type { EntranceStyle } from '@/lib/types'
+import type { BillboardSegmentSprite, BillboardSegmentPortrait, EntranceStyle } from '@/lib/types'
+import { spriteDataToMap } from '@/lib/image-to-sprite'
 import { billboardConfig } from '@/billboard.config'
 
 const ENTRANCE_STYLES: EntranceStyle[] = ['fly-in', 'dissolve', 'sparkle', 'typewriter']
@@ -40,7 +41,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   // Layout state machine
   const [layout, setLayout] = useState<Layout>('splash')
 
-  const { phase, activeIndex, items, submitManualQuery, addItem, deleteItem, jumpTo, lastManualChatIdRef } = useCycle({
+  const { phase, activeIndex, items, submitManualQuery, addItem, deleteItem, jumpTo, lastManualChatIdRef, setItemSprite, removeItemSprite } = useCycle({
     dwellSeconds: billboardConfig.dwellSeconds,
     resumeAfterManualSeconds: billboardConfig.resumeAfterManualSeconds,
   })
@@ -105,6 +106,14 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     deleteItem(id)
   }, [deleteItem])
 
+  const handleUploadSprite = useCallback((id: string, file: File) => {
+    void setItemSprite(id, file)
+  }, [setItemSprite])
+
+  const handleRemoveSprite = useCallback((id: string) => {
+    removeItemSprite(id)
+  }, [removeItemSprite])
+
   if (missingEnvVars.length > 0) {
     return <SetupScreen missingVars={missingEnvVars} fontSize={fontSize} />
   }
@@ -146,6 +155,37 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     (!dotSegments && phase.phase === 'displaying') ? (phase.data.words ?? phase.data.summary) :
     (!dotSegments && phase.phase === 'transitioning') ? (phase.next.words ?? phase.next.summary) :
     ''
+
+  // Derive imageSeg for the active billboard item:
+  //   1. User-uploaded sprite takes priority.
+  //   2. Fall back to LLM-provided portraitColors.
+  //   3. Otherwise undefined (no image block).
+  const activeItem = items[activeIndex]
+  const activeData =
+    phase.phase === 'displaying' ? phase.data :
+    phase.phase === 'transitioning' ? phase.next :
+    activeItem?.data
+
+  // Memoize spriteDataToMap so the Map reference is stable between renders —
+  // DotMatrixDisplay uses imageSeg as a useEffect dep, and a new Map object
+  // on every render would continuously restart the entrance animation.
+  // The reducer replaces the spriteData object reference only when the sprite
+  // actually changes (ITEM_SPRITE_SET), so reference identity is the right dep.
+  const activeSpriteData = activeItem?.spriteData ?? null
+  const spriteMap = useMemo(
+    () => activeSpriteData ? spriteDataToMap(activeSpriteData) : null,
+    [activeSpriteData],
+  )
+
+  let dotImageSeg: BillboardSegmentSprite | BillboardSegmentPortrait | undefined
+  if (spriteMap) {
+    dotImageSeg = { type: 'sprite', spriteMap }
+  } else if (activeData?.portraitColors && activeData.portraitColors.length > 0) {
+    dotImageSeg = {
+      type: 'portrait',
+      colors: activeData.portraitColors,
+    }
+  }
 
   // CSS widths for each panel based on layout
   const leftWidth = layout === 'splash' ? '100%' : layout === 'split' ? '25%' : '0%'
@@ -190,6 +230,8 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
               activeIndex={activeIndex}
               onSelect={jumpTo}
               onDelete={handleDeleteItem}
+              onUploadSprite={handleUploadSprite}
+              onRemoveSprite={handleRemoveSprite}
               fontSize={fontSize}
             />
           }
@@ -249,6 +291,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
             loading={isLoadingPhase}
             streamEnergy={streamEnergy}
             entranceStyle={dotEntranceStyle}
+            imageSeg={dotImageSeg}
           />
         </div>
 

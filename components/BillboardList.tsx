@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { BillboardItem } from '@/lib/types'
 
 interface BillboardListProps {
@@ -8,16 +8,37 @@ interface BillboardListProps {
   activeIndex: number
   onSelect: (index: number) => void
   onDelete: (id: string) => void
+  onUploadSprite: (id: string, file: File) => void
+  onRemoveSprite: (id: string) => void
   fontSize: number
 }
 
-export function BillboardList({ items, activeIndex, onSelect, onDelete, fontSize }: BillboardListProps) {
+export function BillboardList({ items, activeIndex, onSelect, onDelete, onUploadSprite, onRemoveSprite, fontSize }: BillboardListProps) {
   if (items.length === 0) return null
 
   const sm = fontSize * 0.65
   const xs = fontSize * 0.55
 
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
+  // Hidden file input ref — one per list, reused for whichever active item triggers it
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const pendingUploadIdRef = useRef<string | null>(null)
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    const id = pendingUploadIdRef.current
+    if (file && id) {
+      onUploadSprite(id, file)
+    }
+    // Reset so the same file can be re-selected after a remove
+    e.target.value = ''
+    pendingUploadIdRef.current = null
+  }
+
+  const triggerUpload = (id: string) => {
+    pendingUploadIdRef.current = id
+    fileInputRef.current?.click()
+  }
 
   return (
     <div
@@ -30,6 +51,15 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, fontSize
         paddingBottom: 4,
       }}
     >
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg"
+        style={{ display: 'none' }}
+        onChange={handleFileChange}
+      />
+
       <div
         style={{
           fontFamily: "'Courier New', monospace",
@@ -46,6 +76,7 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, fontSize
       {items.map((item, idx) => {
         const isActive = idx === activeIndex % items.length
         const isHovered = hoveredIdx === idx
+        const hasSprite = item.spriteData != null
         return (
           <div
             key={item.id}
@@ -94,6 +125,57 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, fontSize
             >
               {item.query}
             </span>
+
+            {/* Upload / remove sprite — active item only */}
+            {isActive && (
+              <>
+                {/* Upload button — shows ⊕ normally, ⊙ when a sprite is already attached */}
+                <button
+                  onClick={e => { e.stopPropagation(); triggerUpload(item.id) }}
+                  title={hasSprite ? 'Replace logo image' : 'Upload logo image'}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: hasSprite ? '#886622' : '#333333',
+                    fontFamily: "'Courier New', monospace",
+                    fontSize: `${xs}px`,
+                    cursor: 'pointer',
+                    padding: '0 2px',
+                    flexShrink: 0,
+                    lineHeight: 1,
+                    transition: 'color 0.15s',
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc9933' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = hasSprite ? '#886622' : '#333333' }}
+                >
+                  {hasSprite ? '⊙' : '⊕'}
+                </button>
+
+                {/* Remove sprite button — only when a sprite is attached */}
+                {hasSprite && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onRemoveSprite(item.id) }}
+                    title="Remove logo image"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#333333',
+                      fontFamily: "'Courier New', monospace",
+                      fontSize: `${xs}px`,
+                      cursor: 'pointer',
+                      padding: '0 2px',
+                      flexShrink: 0,
+                      lineHeight: 1,
+                      transition: 'color 0.15s',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc6644' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#333333' }}
+                  >
+                    ⊘
+                  </button>
+                )}
+              </>
+            )}
 
             {/* Delete button */}
             <button

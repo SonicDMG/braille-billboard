@@ -1,4 +1,4 @@
-import type { VisualizationData, ChartType, DataPoint, BillboardSegment, DotColor, EntranceStyle } from './types'
+import type { VisualizationData, ChartType, DataPoint, BillboardSegmentText, DotColor, EntranceStyle } from './types'
 
 const CHART_TYPES: ChartType[] = ['line', 'bar', 'sparkline', 'text']
 const VALID_ENTRANCE_STYLES = new Set<string>(['fly-in', 'dissolve', 'sparkle', 'typewriter'])
@@ -114,9 +114,9 @@ function parseDotColor(raw: unknown, fallback: DotColor): DotColor {
  * Supports both the new `color` field and the legacy `emphasis` field.
  * Returns null if the value is absent or structurally invalid.
  */
-function parseSegments(raw: unknown): BillboardSegment[] | null {
+function parseSegments(raw: unknown): BillboardSegmentText[] | null {
   if (!Array.isArray(raw) || raw.length === 0) return null
-  const result: BillboardSegment[] = []
+  const result: BillboardSegmentText[] = []
 
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) return null
@@ -218,6 +218,7 @@ export function parseVisualizationData(raw: string): VisualizationData {
       segments,
       words: segments.map(s => s.text).join(' '),
       entranceStyle: parseEntranceStyle(json.entranceStyle),
+      portraitColors: parsePortraitColors(json.portraitColors),
     }
   }
 
@@ -250,6 +251,22 @@ function parseEntranceStyle(raw: unknown): EntranceStyle {
     return raw as EntranceStyle
   }
   return 'dissolve'
+}
+
+/**
+ * Parse an optional portraitColors array from the LLM response.
+ * Accepts an array of 1–4 strings, each a valid hex or named color.
+ * Returns undefined if absent, empty, or all entries are invalid.
+ */
+function parsePortraitColors(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const colors: string[] = []
+  for (const entry of raw.slice(0, 4)) {
+    if (typeof entry !== 'string') continue
+    const hex = resolveHex(entry)
+    if (hex) colors.push(hex)
+  }
+  return colors.length > 0 ? colors : undefined
 }
 
 // ---------------------------------------------------------------------------

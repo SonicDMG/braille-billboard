@@ -40,7 +40,8 @@ Search the documents for the answer. Respond with this exact JSON — no prose, 
     { "text": "<SUBJECT NAME — the name of the person, product, or entity this billboard is about. 1 to 3 words maximum. This is the brand signature at the bottom of the billboard.>", "color": { "type": "solid", "hex": "gold" } }
   ],
   "dataPoints": [],
-  "entranceStyle": "<one of: fly-in | dissolve | sparkle | typewriter>"
+  "entranceStyle": "<one of: fly-in | dissolve | sparkle | typewriter>",
+  "portraitColors": ["#hex1", "#hex2"]
 }
 
 SEGMENT RULES:
@@ -64,6 +65,16 @@ Gradient — sweeps left to right across the segment:
 Rainbow — full hue cycle across the display width:
   { "type": "rainbow" }
   Use sparingly — for celebration, chaos, or when the subject is inherently colorful.
+
+PORTRAIT GUIDE — include portraitColors only for character, creature, or entity queries
+where you found a clear colour palette in the IMAGE GENERATION DETAILS:
+- Pick 2–4 dominant colors from the palette description, ordered top-to-bottom
+  (e.g. sky color → midground → character → foreground/ground).
+- Use CSS hex strings or the named colors above.
+- Omit the field entirely for data, topic, or abstract queries with no visual character.
+
+Example for a character with warm earth tones and vibrant accents:
+"portraitColors": ["#1a3a5c", "#c8843a", "#8b1a1a", "#3d2b1a"]
 
 ENTRANCE STYLE GUIDE — choose the style that fits the subject mood:
 - fly-in:    fast, urgent, kinetic — action, breaking news
@@ -90,7 +101,8 @@ Example — query: "tell me about Berserker Korg"
     { "text": "BERSERKER KORG",                                                                             "color": { "type": "solid", "hex": "gold" } }
   ],
   "dataPoints": [],
-  "entranceStyle": "fly-in"
+  "entranceStyle": "fly-in",
+  "portraitColors": ["#1a3a1a", "#8b6914", "#5c1a1a", "#3d2b0a"]
 }
 
 If the documents contain NO relevant information:

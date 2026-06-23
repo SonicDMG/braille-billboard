@@ -19,20 +19,21 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { VisualizationData } from "./types";
+import type { VisualizationData, SpriteData } from "./types";
 
 // ---------------------------------------------------------------------------
 // Row type — mirrors the BillboardItem shape, stored flat in SQLite.
-// data and audioB64 are JSON-serialised so we can use a single TEXT column.
+// data, audioB64, and spriteData are JSON-serialised TEXT columns.
 // ---------------------------------------------------------------------------
 
 export type ItemRow = {
   id: string;
   query: string;
   chat_id: string | null;
-  data_json: string;       // JSON-serialised VisualizationData
+  data_json: string;         // JSON-serialised VisualizationData
   audio_b64: string | null;
-  created_at: number;      // ms since epoch
+  sprite_data: string | null; // JSON-serialised SpriteData, or NULL
+  created_at: number;        // ms since epoch
 };
 
 // The deserialised form returned to callers.
@@ -42,6 +43,7 @@ export type PersistedItem = {
   chatId: string | null;
   data: VisualizationData;
   audioB64: string | null;
+  spriteData: SpriteData | null;
   createdAt: number;
 };
 
@@ -71,6 +73,14 @@ function getDb(): Database.Database {
     );
   `);
 
+  // Idempotent migration: add sprite_data column if it doesn't exist yet.
+  const cols = conn
+    .prepare("PRAGMA table_info(items)")
+    .all() as { name: string }[];
+  if (!cols.some((c) => c.name === "sprite_data")) {
+    conn.exec("ALTER TABLE items ADD COLUMN sprite_data TEXT");
+  }
+
   _db = conn;
   return conn;
 }
@@ -86,6 +96,7 @@ function rowToItem(row: ItemRow): PersistedItem {
     chatId: row.chat_id,
     data: JSON.parse(row.data_json) as VisualizationData,
     audioB64: row.audio_b64,
+    spriteData: row.sprite_data ? (JSON.parse(row.sprite_data) as SpriteData) : null,
     createdAt: row.created_at,
   };
 }
@@ -112,8 +123,8 @@ export function insertItem(item: {
 }): void {
   getDb()
     .prepare(
-      `INSERT OR IGNORE INTO items (id, query, chat_id, data_json, audio_b64, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO items (id, query, chat_id, data_json, audio_b64, sprite_data, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
     )
     .run(
       item.id,
@@ -123,6 +134,16 @@ export function insertItem(item: {
       item.audioB64,
       Date.now(),
     );
+}
+
+/**
+ * Update (replace) the sprite_data for an existing item.
+ * Passing null clears the sprite.
+ */
+export function updateItemSprite(id: string, spriteData: SpriteData | null): void {
+  getDb()
+    .prepare("UPDATE items SET sprite_data = ? WHERE id = ?")
+    .run(spriteData ? JSON.stringify(spriteData) : null, id);
 }
 
 /**

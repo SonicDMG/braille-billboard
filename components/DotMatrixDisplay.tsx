@@ -1,7 +1,15 @@
 'use client'
 
 import { useEffect, useRef, useState, useLayoutEffect, useCallback } from 'react'
-import type { BillboardSegment, DotColor, EntranceStyle } from '@/lib/types'
+import type {
+  BillboardSegment,
+  BillboardSegmentSprite,
+  BillboardSegmentPortrait,
+  BillboardSegmentText,
+  DotColor,
+  EntranceStyle,
+  SpriteMap,
+} from '@/lib/types'
 import {
   flyInEntranceFrames,
   dissolveEntranceFrames,
@@ -183,12 +191,12 @@ interface RenderedLine {
  * Word-wrap segment text into lines given a char width budget that varies by
  * scale factor. Returns lines tagged with their scale and color.
  *
- * @param segments    Billboard segments (each may have a different scale)
+ * @param segments    Text-only billboard segments (each may have a different scale)
  * @param scales      Per-segment integer scale factor (parallel array to segments)
  * @param colDotWidth Available dot-columns for the widest scale=1 row
  */
 function buildLines(
-  segments: BillboardSegment[],
+  segments: BillboardSegmentText[],
   scales: number[],
   colDotWidth: number,
 ): RenderedLine[] {
@@ -259,7 +267,7 @@ interface LitDot {
  * Returns an array of integer scales parallel to `segments`.
  */
 function computeScales(
-  segments: BillboardSegment[],
+  segments: BillboardSegmentText[],
   colDotWidth: number,
   maxDotRows: number,
 ): number[] {
@@ -288,7 +296,7 @@ function computeScales(
  * Must be called with the same inputs as buildLitMap.
  */
 function buildSegmentBounds(
-  segments: BillboardSegment[],
+  segments: BillboardSegmentText[],
   cols: number,
   rows: number,
 ): SegmentBounds[] {
@@ -336,13 +344,162 @@ function buildSegmentBounds(
   return bounds
 }
 
-function buildLitMap(
-  segments: BillboardSegment[],
+// ---------------------------------------------------------------------------
+// Sprite / portrait placement helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Describes where to draw an image or portrait block within the dot grid.
+ *
+ * 'beside' — to the right of the text columns, same row range as the text.
+ * 'below'  — below all text rows, full column width.
+ */
+interface SpriteRegion {
+  mode: 'beside' | 'below'
+  colOffset: number   // first dot-column of the sprite block
+  colWidth: number    // available dot-column width
+  rowOffset: number   // first dot-row of the sprite block
+  rowHeight: number   // available dot-row height
+}
+
+/**
+ * Decide where to place a sprite/portrait block given the committed text layout.
+ *
+ * Prefers 'beside' (right of text) when ≥ 16 dot-columns are free and the text
+ * uses at least 8 dot-rows, otherwise falls back to 'below'.
+ */
+function computeSpriteRegion(
+  lines: RenderedLine[],
   cols: number,
   rows: number,
+  usedDotRows: number,
+): SpriteRegion {
+  // Width of the widest text line in dot-columns
+  let maxLineColWidth = 0
+  for (const line of lines) {
+    if (!line.text) continue
+    const charStep = (CHAR_W + GAP) * line.scale
+    const lineWidth = line.text.length * charStep - GAP * line.scale
+    if (lineWidth > maxLineColWidth) maxLineColWidth = lineWidth
+  }
+
+  const asideWidth = cols - maxLineColWidth - SEGMENT_GAP_ROWS
+  const belowHeight = rows - usedDotRows - SEGMENT_GAP_ROWS
+
+  if (asideWidth >= 16 && usedDotRows >= 8) {
+    return {
+      mode: 'beside',
+      colOffset: maxLineColWidth + SEGMENT_GAP_ROWS,
+      colWidth: asideWidth,
+      rowOffset: 0,
+      rowHeight: usedDotRows,
+    }
+  }
+
+  return {
+    mode: 'below',
+    colOffset: 0,
+    colWidth: cols,
+    rowOffset: usedDotRows + SEGMENT_GAP_ROWS,
+    rowHeight: Math.max(0, belowHeight),
+  }
+}
+
+/**
+ * Scale a SpriteMap to fit within a region, preserving aspect ratio.
+ * Returns entries offset by (region.rowOffset, region.colOffset).
+ */
+function buildSpriteDots(
+  spriteMap: SpriteMap,
+  region: SpriteRegion,
+): Map<string, LitDot> {
+  if (region.colWidth <= 0 || region.rowHeight <= 0 || spriteMap.size === 0) {
+    return new Map()
+  }
+
+  // Determine source dimensions from the map's key range
+  let srcRows = 0
+  let srcCols = 0
+  for (const key of spriteMap.keys()) {
+    const [r, c] = key.split(',').map(Number)
+    if (r! + 1 > srcRows) srcRows = r! + 1
+    if (c! + 1 > srcCols) srcCols = c! + 1
+  }
+  if (srcRows === 0 || srcCols === 0) return new Map()
+
+  // Scale to fit within the region preserving aspect ratio
+  const scaleX = region.colWidth / srcCols
+  const scaleY = region.rowHeight / srcRows
+  const scale = Math.min(scaleX, scaleY)
+  const dstCols = Math.floor(srcCols * scale)
+  const dstRows = Math.floor(srcRows * scale)
+
+  if (dstCols <= 0 || dstRows <= 0) return new Map()
+
+  // Build destination pixel array by nearest-neighbour sampling
+  const dst = new Map<string, string>()
+  for (let dr = 0; dr < dstRows; dr++) {
+    for (let dc = 0; dc < dstCols; dc++) {
+      const sr = Math.min(srcRows - 1, Math.floor(dr / scale))
+      const sc = Math.min(srcCols - 1, Math.floor(dc / scale))
+      const hex = spriteMap.get(`${sr},${sc}`)
+      if (hex) dst.set(`${dr},${dc}`, hex)
+    }
+  }
+
+  // Emit as LitDot entries offset into the grid
+  const lit = new Map<string, LitDot>()
+  for (const [key, hex] of dst) {
+    const [r, c] = key.split(',').map(Number)
+    const gr = r! + region.rowOffset
+    const gc = c! + region.colOffset
+    lit.set(`${gr},${gc}`, {
+      color: { type: 'solid', hex },
+      segMinCol: region.colOffset,
+      segMaxCol: region.colOffset + dstCols - 1,
+    })
+  }
+  return lit
+}
+
+/**
+ * Generate a color-banded portrait approximation filling the region.
+ * Colors are applied as equal-height horizontal bands, top-to-bottom.
+ */
+function buildPortraitDots(
+  colors: string[],
+  region: SpriteRegion,
+): Map<string, LitDot> {
+  if (region.colWidth <= 0 || region.rowHeight <= 0 || colors.length === 0) {
+    return new Map()
+  }
+  const lit = new Map<string, LitDot>()
+  const bandHeight = region.rowHeight / colors.length
+
+  for (let dr = 0; dr < region.rowHeight; dr++) {
+    const colorIdx = Math.min(colors.length - 1, Math.floor(dr / bandHeight))
+    const hex = colors[colorIdx]!
+    for (let dc = 0; dc < region.colWidth; dc++) {
+      const gr = dr + region.rowOffset
+      const gc = dc + region.colOffset
+      lit.set(`${gr},${gc}`, {
+        color: { type: 'solid', hex },
+        segMinCol: region.colOffset,
+        segMaxCol: region.colOffset + region.colWidth - 1,
+      })
+    }
+  }
+  return lit
+}
+
+function buildLitMap(
+  segments: BillboardSegmentText[],
+  cols: number,
+  rows: number,
+  imageSeg?: BillboardSegmentSprite | BillboardSegmentPortrait,
 ): Map<string, LitDot> {
   const lit = new Map<string, LitDot>()
-  if (segments.length === 0) return lit
+  if (segments.length === 0 && !imageSeg) return lit
 
   // dot-column budget
   const colDotWidth = cols
@@ -395,6 +552,16 @@ function buildLitMap(
     rowCursor += glyphH + 1
   }
 
+  // Merge image/portrait dots if present
+  if (imageSeg) {
+    const usedDotRows = totalDotRows(lines)
+    const region = computeSpriteRegion(lines, cols, rows, usedDotRows)
+    const imageDots = imageSeg.type === 'sprite'
+      ? buildSpriteDots(imageSeg.spriteMap, region)
+      : buildPortraitDots(imageSeg.colors, region)
+    for (const [key, dot] of imageDots) lit.set(key, dot)
+  }
+
   return lit
 }
 
@@ -406,15 +573,14 @@ function buildLitMap(
  * Given the canvas pixel dimensions and the billboard segments, compute the
  * largest integer DOT_PX such that all content fits.
  *
- * Strategy:
- *  1. For each candidate DOT_PX (from large to small), derive step = DOT_PX + GAP_PX.
- *  2. Compute dot-grid dimensions (cols, rows).
- *  3. Compute the scales and total rows needed; accept if content fits.
+ * When an imageSeg is provided its estimated row contribution is included in
+ * the fit check (portrait/sprite placed below text adds rows).
  */
 function computeDotPx(
   canvasW: number,
   canvasH: number,
-  segments: BillboardSegment[],
+  segments: BillboardSegmentText[],
+  imageSeg?: BillboardSegmentSprite | BillboardSegmentPortrait,
 ): number {
   const MIN_DOT = 3
   const MAX_DOT = 18
@@ -425,11 +591,28 @@ function computeDotPx(
     const rows = Math.floor((canvasH + GAP_PX) / step)
     if (cols <= 0 || rows <= 0) continue
 
-    if (segments.length === 0) return dotPx  // loading/text — any size works
+    if (segments.length === 0 && !imageSeg) return dotPx  // loading — any size works
 
     const scales = computeScales(segments, cols, rows)
     const lines = buildLines(segments, scales, cols)
-    if (totalDotRows(lines) <= rows) return dotPx
+    const textRows = totalDotRows(lines)
+
+    if (!imageSeg) {
+      if (textRows <= rows) return dotPx
+      continue
+    }
+
+    // Estimate image rows: if the image would go 'beside', it costs 0 extra rows;
+    // if 'below', it needs at least its own dot-rows.
+    const region = computeSpriteRegion(lines, cols, rows, textRows)
+    if (region.mode === 'beside') {
+      if (textRows <= rows) return dotPx
+    } else {
+      // Portrait/sprite aspect ratio approximation: assume square-ish (1:1)
+      const imgCols = cols
+      const imgRows = imgCols  // worst case estimate
+      if (textRows + SEGMENT_GAP_ROWS + imgRows <= rows) return dotPx
+    }
   }
 
   return MIN_DOT
@@ -458,7 +641,7 @@ function makeEntranceGenerator(
 
 interface DotMatrixDisplayProps {
   /** Structured billboard segments with per-segment color. */
-  segments?: BillboardSegment[]
+  segments?: BillboardSegmentText[]
   /** Flat text fallback (legacy / loading). */
   text?: string
   /** When true, shows a scanning loading animation instead of text. */
@@ -478,9 +661,14 @@ interface DotMatrixDisplayProps {
    * array) start immediately after the prior one completes.
    */
   segmentDelaysMs?: number[]
+  /**
+   * Optional image segment to render in available whitespace.
+   * Either a user-uploaded sprite or an LLM-derived portrait approximation.
+   */
+  imageSeg?: BillboardSegmentSprite | BillboardSegmentPortrait
 }
 
-export function DotMatrixDisplay({ segments, text = '', loading = false, streamEnergy = 0, entranceStyle = 'dissolve', segmentDelaysMs }: DotMatrixDisplayProps) {
+export function DotMatrixDisplay({ segments, text = '', loading = false, streamEnergy = 0, entranceStyle = 'dissolve', segmentDelaysMs, imageSeg }: DotMatrixDisplayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
@@ -547,7 +735,7 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
     const d = dims
     if (!canvas || !d) return
 
-    const effectiveSegments: BillboardSegment[] = loading
+    const effectiveSegments: BillboardSegmentText[] = loading
       ? []
       : segments && segments.length > 0
         ? segments
@@ -556,7 +744,7 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
           : []
 
     // Pick the largest dot size that fits all content
-    const DOT_PX = loading ? 5 : computeDotPx(d.w, d.h, effectiveSegments)
+    const DOT_PX = loading ? 5 : computeDotPx(d.w, d.h, effectiveSegments, imageSeg)
     const STEP = DOT_PX + GAP_PX
 
     const cols = Math.floor((d.w + GAP_PX) / STEP)
@@ -575,7 +763,7 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
 
     const litMap = loading
       ? new Map<string, LitDot>()
-      : buildLitMap(effectiveSegments, cols, rows)
+      : buildLitMap(effectiveSegments, cols, rows, imageSeg)
 
     // Keep dim/grid snapshot fresh for the entrance interval
     if (!loading) {
@@ -688,7 +876,7 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
         }
       }
     }
-  }, [dims, segments, text, loading, entranceStyle])
+  }, [dims, segments, text, loading, entranceStyle, imageSeg])
 
   // Keep drawRef current after every render so the entrance interval always calls
   // the latest draw without that function being in the interval's dep array.
@@ -759,26 +947,30 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
     const d = dimsRef.current
     if (!d) return
 
-    const effectiveSegments: BillboardSegment[] =
+    const effectiveSegments: BillboardSegmentText[] =
       segments && segments.length > 0
         ? segments
         : text
           ? [{ text, color: { type: 'solid', hex: '#ff6600' } }]
           : []
 
-    if (effectiveSegments.length === 0) return
+    if (effectiveSegments.length === 0 && !imageSeg) return
 
     // Only reset when the actual content (or style) has changed — not on resize.
-    const newKey = `${entranceStyle}|${effectiveSegments.map(s => s.text).join('|')}`
+    // Include the imageSeg type/size in the key so adding/removing a sprite restarts.
+    const imageKey = imageSeg
+      ? imageSeg.type === 'sprite' ? `sprite:${imageSeg.spriteMap.size}` : `portrait:${imageSeg.colors.join(',')}`
+      : ''
+    const newKey = `${entranceStyle}|${effectiveSegments.map(s => s.text).join('|')}|${imageKey}`
     if (newKey === entranceKeyRef.current) return
 
-    const DOT_PX = computeDotPx(d.w, d.h, effectiveSegments)
+    const DOT_PX = computeDotPx(d.w, d.h, effectiveSegments, imageSeg)
     const STEP = DOT_PX + GAP_PX
     const cols = Math.floor((d.w + GAP_PX) / STEP)
     const rows = Math.floor((d.h + GAP_PX) / STEP)
     if (cols <= 0 || rows <= 0) return
 
-    const litMap = buildLitMap(effectiveSegments, cols, rows)
+    const litMap = buildLitMap(effectiveSegments, cols, rows, imageSeg)
     const litKeys = new Set(litMap.keys())
 
     // Pre-populate every lit dot at alpha=0 so the very first draw() after this
@@ -795,15 +987,25 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
 
     const bounds = buildSegmentBounds(effectiveSegments, cols, rows)
     entranceBoundsRef.current = bounds
-    entranceSegRef.current = bounds.length > 0 ? 0 : -1
-    entranceGenRef.current = bounds.length > 0
-      ? makeEntranceGenerator(entranceStyle, { cols, rows, litKeys, bounds: bounds[0]! })
-      : null
+
+    if (bounds.length > 0) {
+      // Normal path: animate text segments in sequence; the interval will snap
+      // sprite/portrait dots to 1 when the last text segment completes.
+      entranceSegRef.current = 0
+      entranceGenRef.current = makeEntranceGenerator(entranceStyle, { cols, rows, litKeys, bounds: bounds[0]! })
+    } else {
+      // No text segments (sprite/portrait only) — snap everything to fully lit
+      // immediately so the interval loop doesn't leave the image dark.
+      for (const key of litKeys) initialAlpha.set(key, 1)
+      entranceAlphaRef.current = initialAlpha
+      entranceSegRef.current = -1
+      entranceGenRef.current = null
+    }
     entranceKeyRef.current = newKey
     // Record the wall-clock time this entrance sequence started so the interval
     // can compare against segmentDelaysMs offsets.
     entranceStartTimeRef.current = Date.now()
-  }, [segments, text, entranceStyle, loading, dimsReady])
+  }, [segments, text, entranceStyle, loading, dimsReady, imageSeg])
 
   // ── Entrance animation interval ────────────────────────────────────────────
   // Runs at 30 ms when segments are active. Advances the active segment's
@@ -904,7 +1106,15 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
               })
             }
           } else {
-            // All segments complete
+            // All text segments complete — snap any remaining unlit dots to 1.
+            // This covers sprite / portrait dots that live outside the text bounds
+            // and were pre-seeded at alpha=0 by the entrance init but never driven
+            // by a generator (they have no segment bound of their own).
+            for (const key of entranceLitKeysRef.current) {
+              if ((entranceAlphaRef.current.get(key) ?? 1) < 1) {
+                entranceAlphaRef.current.set(key, 1)
+              }
+            }
             entranceSegRef.current = -1
             entranceGenRef.current = null
             if (entranceIntervalRef.current) {
