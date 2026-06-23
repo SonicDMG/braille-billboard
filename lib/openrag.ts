@@ -35,7 +35,7 @@ Search the documents for the answer. Respond with this exact JSON — no prose, 
   "title": "<the billboard headline — 2 to 6 words, punchy, printed 10 feet tall>",
   "summary": "<one sentence. The kind a driver reads at 60mph and remembers.>",
   "segments": [
-    { "text": "<body copy — 1 to 3 sentences. The facts, the story, the argument.>", "color": { "type": "solid", "hex": "amber" } },
+    { "text": "<body copy — 1 to 3 sentences. Use rhythm, parallel structure, or alliteration. Rhyme only if it serves the meaning.>", "color": { "type": "solid", "hex": "amber" } },
     { "text": "<tagline — 3 to 7 words. Short. Punchy. Impossible to forget.>",       "color": { "type": "solid", "hex": "white" } },
     { "text": "<SUBJECT NAME — the name of the person, product, or entity this billboard is about. 1 to 3 words maximum. This is the brand signature at the bottom of the billboard.>", "color": { "type": "solid", "hex": "gold" } }
   ],
@@ -46,7 +46,7 @@ Search the documents for the answer. Respond with this exact JSON — no prose, 
 SEGMENT RULES:
 - The LAST segment is always the subject name — the entity this billboard is about (a product, person, place, concept).
   It must be 1 to 3 words. It is the brand signature. It always appears.
-- The FIRST segment is body copy — the facts, the story, the argument. 1 to 3 sentences.
+- The FIRST segment is body copy — the facts, told with rhythm. Use parallel structure, alliteration, or punchy cadence. Rhyme only if it serves the meaning. 1 to 3 sentences.
 - The MIDDLE segment (optional) is the tagline — punchy, 3 to 7 words. Use only when it genuinely adds impact.
 - Total segments: 2 (body + subject) or 3 (body + tagline + subject).
 
@@ -85,7 +85,7 @@ Example — query: "tell me about Berserker Korg"
   "title": "FURY BUILT. DEVASTATING BLOWS.",
   "summary": "35 HP. One bad mood. Do not approach.",
   "segments": [
-    { "text": "Reckless Attack hits hard. Rage Strike hits harder. He does not stop until the floor is wet.", "color": { "type": "solid", "hex": "amber" } },
+    { "text": "Reckless Attack. Rage Strike. He hits until nothing moves.", "color": { "type": "solid", "hex": "amber" } },
     { "text": "BUILD AGENTS. NOT BOILERPLATE.",                                                              "color": { "type": "gradient", "from": "red", "to": "orange" } },
     { "text": "BERSERKER KORG",                                                                             "color": { "type": "solid", "hex": "gold" } }
   ],
