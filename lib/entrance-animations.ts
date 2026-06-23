@@ -99,49 +99,51 @@ function keysInBounds(litKeys: Set<string>, bounds: SegmentBounds): string[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Each lit dot in the segment slides in from off-screen right.
- * Columns launch with a staggered cascade (rightmost first) and ease into
- * their rest position. Alpha snaps to 1 once within 1 column of rest.
- * ~20 ticks per segment at full settlement.
+ * Columns sweep in from right to left.
+ * Each column has a birth tick proportional to its distance from the right
+ * edge — rightmost columns appear first, leftmost last — producing a clear
+ * directional wave. After birth a column fades from 0 → 1 over FADE_TICKS.
+ * ~30 ticks per segment at 30 ms ≈ 900 ms total.
  */
 export function* flyInEntranceFrames(opts: EntranceOptions): Generator<AlphaMap> {
   const { cols, bounds, litKeys } = opts
-  const EASE_K = 0.22
-  const LAUNCH_SPREAD = 4
+  const FADE_TICKS = 5
+  // Spread the wave over half the total tick budget so the stagger is obvious.
+  const WAVE_TICKS = 20
 
-  // Per-column x-offset (float). 0 = settled. Positive = off-screen right.
-  const offsets = new Map<number, number>()
   const segKeys = keysInBounds(litKeys, bounds)
 
-  // Determine which columns have content in this segment.
+  // Collect active columns and their content min/max for birth-tick calculation.
   const activeCols = new Set<number>()
   for (const key of segKeys) {
-    const c = parseInt(key.split(',')[1]!, 10)
-    activeCols.add(c)
+    activeCols.add(parseInt(key.split(',')[1]!, 10))
   }
 
-  // Launch all active columns immediately with cascade offset.
+  const colArr = Array.from(activeCols).sort((a, b) => a - b)
+  const minCol = colArr[0] ?? 0
+  const maxCol = colArr[colArr.length - 1] ?? cols - 1
+  const span = Math.max(1, maxCol - minCol)
+
+  // Rightmost column (maxCol) births at tick 0; leftmost at tick WAVE_TICKS.
+  const birthTick = new Map<number, number>()
   for (const c of activeCols) {
-    const cascade = LAUNCH_SPREAD * (cols - c) / Math.max(1, cols)
-    offsets.set(c, cols + cascade)
+    birthTick.set(c, Math.round(WAVE_TICKS * (maxCol - c) / span))
   }
+
+  let tick = 0
 
   while (true) {
     const alpha: AlphaMap = new Map()
 
-    for (const c of activeCols) {
-      const offset = offsets.get(c) ?? 0
-      const remaining = offset
-      const newOffset = remaining > 0.5 ? offset - remaining * EASE_K : 0
-      offsets.set(c, newOffset)
-      const a = newOffset < 1.0 ? 1 : Math.max(0, 1 - (newOffset - 1) / cols)
-
-      for (const key of segKeys) {
-        const kc = parseInt(key.split(',')[1]!, 10)
-        if (kc === c) alpha.set(key, a)
-      }
+    for (const key of segKeys) {
+      const c = parseInt(key.split(',')[1]!, 10)
+      const birth = birthTick.get(c) ?? 0
+      const age = tick - birth
+      const a = age < 0 ? 0 : age >= FADE_TICKS ? 1 : age / FADE_TICKS
+      alpha.set(key, a)
     }
 
+    tick++
     yield alpha
   }
 }
