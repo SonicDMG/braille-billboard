@@ -196,6 +196,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
             <BillboardList
               items={items}
               activeIndex={activeIndex}
+              onSelect={jumpTo}
               onDelete={handleDeleteItem}
               fontSize={fontSize}
             />

@@ -1,19 +1,23 @@
 'use client'
 
+import { useState } from 'react'
 import type { BillboardItem } from '@/lib/types'
 
 interface BillboardListProps {
   items: BillboardItem[]
   activeIndex: number
+  onSelect: (index: number) => void
   onDelete: (id: string) => void
   fontSize: number
 }
 
-export function BillboardList({ items, activeIndex, onDelete, fontSize }: BillboardListProps) {
+export function BillboardList({ items, activeIndex, onSelect, onDelete, fontSize }: BillboardListProps) {
   if (items.length === 0) return null
 
   const sm = fontSize * 0.65
   const xs = fontSize * 0.55
+
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
 
   return (
     <div
@@ -41,9 +45,13 @@ export function BillboardList({ items, activeIndex, onDelete, fontSize }: Billbo
 
       {items.map((item, idx) => {
         const isActive = idx === activeIndex % items.length
+        const isHovered = hoveredIdx === idx
         return (
           <div
             key={item.id}
+            onClick={() => onSelect(idx)}
+            onMouseEnter={() => setHoveredIdx(idx)}
+            onMouseLeave={() => setHoveredIdx(null)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -54,6 +62,7 @@ export function BillboardList({ items, activeIndex, onDelete, fontSize }: Billbo
               background: isActive ? '#0d0d0d' : 'transparent',
               transition: 'background 0.3s, border-color 0.3s',
               flexShrink: 0,
+              cursor: isActive ? 'default' : 'pointer',
             }}
           >
             {/* Active indicator */}
@@ -74,7 +83,7 @@ export function BillboardList({ items, activeIndex, onDelete, fontSize }: Billbo
               style={{
                 fontFamily: "'Courier New', monospace",
                 fontSize: `${sm}px`,
-                color: isActive ? '#888888' : '#444444',
+                color: isActive ? '#888888' : isHovered ? '#666666' : '#444444',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -88,7 +97,7 @@ export function BillboardList({ items, activeIndex, onDelete, fontSize }: Billbo
 
             {/* Delete button */}
             <button
-              onClick={() => onDelete(item.id)}
+              onClick={e => { e.stopPropagation(); onDelete(item.id) }}
               title={`Remove "${item.query}"`}
               style={{
                 background: 'none',
