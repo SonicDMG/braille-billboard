@@ -28,6 +28,7 @@ type CycleAction =
   | { type: 'MANUAL_COMPLETE'; data: VisualizationData; chatId: string | null; audioB64: string | null }
   | { type: 'MANUAL_ERROR'; message: string }
   | { type: 'RESUME_AUTO' }
+  | { type: 'ITEMS_LOADED'; items: BillboardItem[] }
   | { type: 'ITEM_ADDED'; item: BillboardItem }
   | { type: 'ITEM_DELETED'; id: string }
   | { type: 'JUMP_TO'; index: number }
@@ -151,6 +152,9 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       }
     }
 
+    case 'ITEMS_LOADED':
+      return { ...state, items: action.items }
+
     case 'ITEM_ADDED':
       return {
         ...state,
@@ -218,6 +222,23 @@ export function useCycle({
     dwellSeconds,
     resumeAfterManualSeconds,
   })
+
+  // Hydrate playlist from SQLite on first mount.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/items')
+        if (!res.ok) return
+        const json = await res.json() as { items: BillboardItem[] }
+        if (json.items.length > 0) {
+          dispatch({ type: 'ITEMS_LOADED', items: json.items })
+          dispatch({ type: 'START_NEXT' })
+        }
+      } catch {
+        // Non-fatal — app works fine with an empty playlist.
+      }
+    })()
+  }, [])
 
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -392,14 +413,22 @@ export function useCycle({
     dispatch({ type: 'ITEM_ADDED', item })
     // If we were idle, start cycling immediately
     dispatch({ type: 'START_NEXT' })
+    // Persist to SQLite — fire-and-forget, UI is not gated on write.
+    void fetch('/api/items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, query, chatId, data, audioB64 }),
+    })
   }, [])
 
   /**
-   * Remove a billboard item from the list and optionally delete its OpenRAG
-   * conversation. Deletion is fire-and-forget — UI updates immediately.
+   * Remove a billboard item from the list. Dispatches immediately so the UI
+   * updates at once, then fires DELETE /api/items/[id] to remove the SQLite row
+   * and clean up the OpenRAG conversation server-side.
    */
   const deleteItem = useCallback((id: string) => {
     dispatch({ type: 'ITEM_DELETED', id })
+    void fetch(`/api/items/${id}`, { method: 'DELETE' })
   }, [])
 
   const jumpTo = useCallback((index: number) => {

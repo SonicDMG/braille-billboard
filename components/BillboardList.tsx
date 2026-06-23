@@ -5,7 +5,7 @@ import type { BillboardItem } from '@/lib/types'
 interface BillboardListProps {
   items: BillboardItem[]
   activeIndex: number
-  onDelete: (id: string, chatId: string | null) => void
+  onDelete: (id: string) => void
   fontSize: number
 }
 
@@ -88,7 +88,7 @@ export function BillboardList({ items, activeIndex, onDelete, fontSize }: Billbo
 
             {/* Delete button */}
             <button
-              onClick={() => onDelete(item.id, item.chatId)}
+              onClick={() => onDelete(item.id)}
               title={`Remove "${item.query}"`}
               style={{
                 background: 'none',
