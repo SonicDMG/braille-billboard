@@ -11,8 +11,14 @@ import { useCycle } from '@/hooks/useCycle'
 import { useBrailleResize } from '@/hooks/useBrailleResize'
 import { useAudio } from '@/hooks/useAudio'
 import { useMusicToggle } from '@/hooks/useMusicToggle'
-import type { VisualizationData } from '@/lib/types'
+import type { VisualizationData, EntranceStyle } from '@/lib/types'
 import { billboardConfig } from '@/billboard.config'
+
+const ENTRANCE_STYLES: EntranceStyle[] = ['fly-in', 'dissolve', 'sparkle', 'typewriter']
+
+function randomEntranceStyle(): EntranceStyle {
+  return ENTRANCE_STYLES[Math.floor(Math.random() * ENTRANCE_STYLES.length)]!
+}
 
 interface BillboardProps {
   missingEnvVars: string[]
@@ -63,6 +69,18 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
 
   // Keep the ref in sync so the audio onEnded closure always calls the latest version.
   triggerDwellDoneRef.current = triggerDwellDone
+
+  // Stable entrance style for the current displaying phase.
+  // Picked once when we enter 'displaying'; held until the billboard changes.
+  const fallbackEntranceRef = useRef<EntranceStyle>('dissolve')
+  const lastDisplayingKeyRef = useRef<string>('')
+  if (phase.phase === 'displaying') {
+    const key = phase.data.segments?.map(s => s.text).join('|') ?? phase.data.title
+    if (key !== lastDisplayingKeyRef.current) {
+      lastDisplayingKeyRef.current = key
+      fallbackEntranceRef.current = randomEntranceStyle()
+    }
+  }
 
   // When a manual query completes (manual → transitioning), add it to the billboard list.
   // We track the last manual query string so we can pair it with the resulting VisualizationData.
@@ -149,6 +167,9 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const dotSegments =
     phase.phase === 'displaying' ? phase.data.segments :
     phase.phase === 'transitioning' ? phase.next.segments :
+    undefined
+  const dotEntranceStyle =
+    phase.phase === 'displaying' ? (phase.data.entranceStyle ?? fallbackEntranceRef.current) :
     undefined
   const dotText =
     phase.phase === 'error' ? 'ERROR' :
@@ -259,6 +280,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
             text={dotText}
             loading={isLoadingPhase}
             streamEnergy={streamEnergy}
+            entranceStyle={dotEntranceStyle}
           />
         </div>
 

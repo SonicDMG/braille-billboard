@@ -1,6 +1,7 @@
-import type { VisualizationData, ChartType, DataPoint, BillboardSegment, DotColor } from './types'
+import type { VisualizationData, ChartType, DataPoint, BillboardSegment, DotColor, EntranceStyle } from './types'
 
 const CHART_TYPES: ChartType[] = ['line', 'bar', 'sparkline', 'text']
+const VALID_ENTRANCE_STYLES = new Set<string>(['fly-in', 'dissolve', 'sparkle', 'typewriter'])
 const MAX_DATA_POINTS = 24
 
 // Word budget — mirrors the hard caps in the LLM prompt.
@@ -220,6 +221,7 @@ export function parseVisualizationData(raw: string): VisualizationData {
       segments,
       words: segments.map(s => s.text).join(' '),
       musicPrompt: json.musicPrompt.trim(),
+      entranceStyle: parseEntranceStyle(json.entranceStyle),
     }
   }
 
@@ -244,7 +246,15 @@ export function parseVisualizationData(raw: string): VisualizationData {
     dataPoints,
     unit: typeof json.unit === 'string' ? json.unit : undefined,
     musicPrompt: json.musicPrompt.trim(),
+    entranceStyle: parseEntranceStyle(json.entranceStyle),
   }
+}
+
+function parseEntranceStyle(raw: unknown): EntranceStyle {
+  if (typeof raw === 'string' && VALID_ENTRANCE_STYLES.has(raw)) {
+    return raw as EntranceStyle
+  }
+  return 'dissolve'
 }
 
 // ---------------------------------------------------------------------------
