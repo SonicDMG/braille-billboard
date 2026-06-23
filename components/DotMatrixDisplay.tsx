@@ -470,9 +470,17 @@ interface DotMatrixDisplayProps {
   streamEnergy?: number
   /** Entrance animation style to play when segments first appear. Default: 'dissolve'. */
   entranceStyle?: EntranceStyle
+  /**
+   * Absolute ms offsets (from when the entrance starts) at which each segment
+   * begins animating in. Index 0 = first segment. When provided, subsequent
+   * segments wait until their scheduled time rather than following immediately
+   * after the previous segment finishes. Unscheduled segments (index beyond the
+   * array) start immediately after the prior one completes.
+   */
+  segmentDelaysMs?: number[]
 }
 
-export function DotMatrixDisplay({ segments, text = '', loading = false, streamEnergy = 0, entranceStyle = 'dissolve' }: DotMatrixDisplayProps) {
+export function DotMatrixDisplay({ segments, text = '', loading = false, streamEnergy = 0, entranceStyle = 'dissolve', segmentDelaysMs }: DotMatrixDisplayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
@@ -511,6 +519,11 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
   // Stable ref to entranceStyle so the interval closure reads the latest value
   const entranceStyleRef = useRef<EntranceStyle>(entranceStyle)
   entranceStyleRef.current = entranceStyle
+  // Stable ref to segmentDelaysMs so the interval closure reads the latest value
+  const segmentDelaysMsRef = useRef<number[] | undefined>(segmentDelaysMs)
+  segmentDelaysMsRef.current = segmentDelaysMs
+  // Absolute timestamp (Date.now()) when the current entrance sequence began
+  const entranceStartTimeRef = useRef<number>(0)
   // Stable ref to draw so the entrance interval can call it without being in its dep array
   const drawRef = useRef<() => void>(() => {})
 
@@ -787,11 +800,16 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
       ? makeEntranceGenerator(entranceStyle, { cols, rows, litKeys, bounds: bounds[0]! })
       : null
     entranceKeyRef.current = newKey
+    // Record the wall-clock time this entrance sequence started so the interval
+    // can compare against segmentDelaysMs offsets.
+    entranceStartTimeRef.current = Date.now()
   }, [segments, text, entranceStyle, loading, dimsReady])
 
   // ── Entrance animation interval ────────────────────────────────────────────
   // Runs at 30 ms when segments are active. Advances the active segment's
   // generator, checks 70% completion to stagger to the next segment.
+  // When segmentDelaysMs is set, subsequent segments also wait until their
+  // scheduled time offset (measured from entranceStartTimeRef) before starting.
   useEffect(() => {
     if (loading) {
       // Clear any active entrance when we enter loading phase
@@ -808,7 +826,28 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
       if (segIdx < 0) return  // all done
 
       const gen = entranceGenRef.current
-      if (!gen) return
+      if (!gen) {
+        // Parked: waiting for this segment's scheduled start time.
+        // Check every tick whether the time has arrived and, if so, start it.
+        const delays = segmentDelaysMsRef.current
+        const scheduledDelay = delays?.[segIdx]
+        if (scheduledDelay !== undefined) {
+          const elapsed = Date.now() - entranceStartTimeRef.current
+          if (elapsed >= scheduledDelay) {
+            const nextBounds = entranceBoundsRef.current[segIdx]
+            if (nextBounds) {
+              entranceGenRef.current = makeEntranceGenerator(entranceStyleRef.current, {
+                cols: entranceColsRef.current,
+                rows: entranceRowsRef.current,
+                litKeys: entranceLitKeysRef.current,
+                bounds: nextBounds,
+              })
+            }
+          }
+        }
+        drawRef.current()
+        return
+      }
 
       const result = gen.next()
       if (result.done) return
@@ -848,13 +887,22 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
           const nextBounds = entranceBoundsRef.current[nextIdx]
           if (nextBounds) {
             entranceSegRef.current = nextIdx
-            const litKeys2 = entranceLitKeysRef.current
-            entranceGenRef.current = makeEntranceGenerator(entranceStyleRef.current, {
-              cols: entranceColsRef.current,
-              rows: entranceRowsRef.current,
-              litKeys: litKeys2,
-              bounds: nextBounds,
-            })
+            const delays = segmentDelaysMsRef.current
+            const scheduledDelay = delays?.[nextIdx]
+            const elapsed = Date.now() - entranceStartTimeRef.current
+            if (scheduledDelay !== undefined && elapsed < scheduledDelay) {
+              // Not yet time — park with no generator; the interval will keep
+              // polling until the scheduled moment arrives, then start it.
+              entranceGenRef.current = null
+            } else {
+              const litKeys2 = entranceLitKeysRef.current
+              entranceGenRef.current = makeEntranceGenerator(entranceStyleRef.current, {
+                cols: entranceColsRef.current,
+                rows: entranceRowsRef.current,
+                litKeys: litKeys2,
+                bounds: nextBounds,
+              })
+            }
           } else {
             // All segments complete
             entranceSegRef.current = -1

@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useCallback } from 'react'
+import { useRef, useCallback, useEffect } from 'react'
 
 /**
  * Manages a single HTMLAudioElement with fade-in/out support.
@@ -14,6 +14,28 @@ export function useAudio(onEnded?: () => void) {
   const fadeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const onEndedRef = useRef(onEnded)
   onEndedRef.current = onEnded
+
+  // Browsers block audio that isn't triggered directly by a user gesture.
+  // On the first pointer or keyboard interaction we play+pause a silent audio
+  // element to unlock the audio context for all subsequent programmatic plays.
+  useEffect(() => {
+    let unlocked = false
+    const unlock = () => {
+      if (unlocked) return
+      unlocked = true
+      const silent = new Audio()
+      silent.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
+      void silent.play().catch(() => {/* ignore */})
+      document.removeEventListener('pointerdown', unlock)
+      document.removeEventListener('keydown', unlock)
+    }
+    document.addEventListener('pointerdown', unlock)
+    document.addEventListener('keydown', unlock)
+    return () => {
+      document.removeEventListener('pointerdown', unlock)
+      document.removeEventListener('keydown', unlock)
+    }
+  }, [])
 
   const clearFade = useCallback(() => {
     if (fadeTimerRef.current) {
