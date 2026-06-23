@@ -112,18 +112,9 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     return () => window.removeEventListener('keydown', handler)
   }, [layout])
 
-  // Handle item deletion — fires API to delete OpenRAG conversation, updates list
-  const handleDeleteItem = useCallback(async (id: string, chatId: string | null) => {
-    // Optimistically remove from UI
+  // Handle item deletion — DB row removal and OpenRAG cleanup happen in DELETE /api/items/[id].
+  const handleDeleteItem = useCallback((id: string) => {
     deleteItem(id)
-    // Fire-and-forget OpenRAG deletion
-    if (chatId) {
-      try {
-        await fetch(`/api/conversation/${chatId}`, { method: 'DELETE' })
-      } catch {
-        // silent — item already removed from UI
-      }
-    }
   }, [deleteItem])
 
   if (missingEnvVars.length > 0) {
@@ -205,6 +196,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
             <BillboardList
               items={items}
               activeIndex={activeIndex}
+              onSelect={jumpTo}
               onDelete={handleDeleteItem}
               fontSize={fontSize}
             />

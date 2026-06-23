@@ -28,6 +28,7 @@ type CycleAction =
   | { type: 'MANUAL_COMPLETE'; data: VisualizationData; chatId: string | null; audioB64: string | null }
   | { type: 'MANUAL_ERROR'; message: string }
   | { type: 'RESUME_AUTO' }
+  | { type: 'ITEMS_LOADED'; items: BillboardItem[] }
   | { type: 'ITEM_ADDED'; item: BillboardItem }
   | { type: 'ITEM_DELETED'; id: string }
   | { type: 'JUMP_TO'; index: number }
@@ -151,6 +152,9 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       }
     }
 
+    case 'ITEMS_LOADED':
+      return { ...state, items: action.items }
+
     case 'ITEM_ADDED':
       return {
         ...state,
@@ -219,10 +223,36 @@ export function useCycle({
     resumeAfterManualSeconds,
   })
 
-  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   // Cache: prevents re-fetching the same question across cycles.
   const cacheRef = useRef<Map<string, { data: VisualizationData; chatId: string | null; audioB64: string | null }>>(new Map())
+
+  // Hydrate playlist from SQLite on first mount.
+  // Pre-populate the cache with every restored item so the loading phase
+  // resolves instantly from stored data instead of re-querying OpenRAG.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/items')
+        if (!res.ok) return
+        const json = await res.json() as { items: BillboardItem[] }
+        if (json.items.length > 0) {
+          for (const item of json.items) {
+            cacheRef.current.set(item.query.trim().toLowerCase(), {
+              data: item.data,
+              chatId: item.chatId,
+              audioB64: item.audioB64,
+            })
+          }
+          dispatch({ type: 'ITEMS_LOADED', items: json.items })
+          dispatch({ type: 'START_NEXT' })
+        }
+      } catch {
+        // Non-fatal — app works fine with an empty playlist.
+      }
+    })()
+  }, [])
+
+  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { phase } = state
   const onReadyRef = useRef(onVisualizationReady)
@@ -392,14 +422,33 @@ export function useCycle({
     dispatch({ type: 'ITEM_ADDED', item })
     // If we were idle, start cycling immediately
     dispatch({ type: 'START_NEXT' })
+    // Persist to SQLite — fire-and-forget, UI is not gated on write.
+    void fetch('/api/items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, query, chatId, data, audioB64 }),
+    })
   }, [])
 
+  // Stable ref to current state so deleteItem can read chatId without
+  // being re-created on every state change.
+  const stateRef = useRef(state)
+  stateRef.current = state
+
   /**
-   * Remove a billboard item from the list and optionally delete its OpenRAG
-   * conversation. Deletion is fire-and-forget — UI updates immediately.
+   * Remove a billboard item from the list. Dispatches immediately so the UI
+   * updates at once, then fires DELETE /api/items/[id] to remove the SQLite row
+   * and clean up the OpenRAG conversation server-side. Passes chatId in the
+   * request body as a fallback for items whose DB row may not exist.
    */
   const deleteItem = useCallback((id: string) => {
+    const chatId = stateRef.current.items.find(it => it.id === id)?.chatId ?? null
     dispatch({ type: 'ITEM_DELETED', id })
+    void fetch(`/api/items/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId }),
+    })
   }, [])
 
   const jumpTo = useCallback((index: number) => {
