@@ -71,16 +71,15 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   triggerDwellDoneRef.current = triggerDwellDone
 
   // Stable entrance style for the current displaying phase.
-  // Picked once when we enter 'displaying'; held until the billboard changes.
+  // Re-rolled every time we freshly enter 'displaying' (including cycling back
+  // to the same billboard) so repeated visits each get a different animation.
   const fallbackEntranceRef = useRef<EntranceStyle>('dissolve')
-  const lastDisplayingKeyRef = useRef<string>('')
-  if (phase.phase === 'displaying') {
-    const key = phase.data.segments?.map(s => s.text).join('|') ?? phase.data.title
-    if (key !== lastDisplayingKeyRef.current) {
-      lastDisplayingKeyRef.current = key
-      fallbackEntranceRef.current = randomEntranceStyle()
-    }
+  const lastPhaseRef = useRef<string>('')
+  const currentPhase = phase.phase
+  if (currentPhase === 'displaying' && lastPhaseRef.current !== 'displaying') {
+    fallbackEntranceRef.current = randomEntranceStyle()
   }
+  lastPhaseRef.current = currentPhase
 
   // When a manual query completes (manual → transitioning), add it to the billboard list.
   // We track the last manual query string so we can pair it with the resulting VisualizationData.
@@ -170,6 +169,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     undefined
   const dotEntranceStyle =
     phase.phase === 'displaying' ? (phase.data.entranceStyle ?? fallbackEntranceRef.current) :
+    phase.phase === 'transitioning' ? (phase.next.entranceStyle ?? fallbackEntranceRef.current) :
     undefined
   const dotText =
     phase.phase === 'error' ? 'ERROR' :
