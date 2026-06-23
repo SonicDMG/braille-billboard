@@ -223,7 +223,12 @@ export function useCycle({
     resumeAfterManualSeconds,
   })
 
+  // Cache: prevents re-fetching the same question across cycles.
+  const cacheRef = useRef<Map<string, { data: VisualizationData; chatId: string | null; audioB64: string | null }>>(new Map())
+
   // Hydrate playlist from SQLite on first mount.
+  // Pre-populate the cache with every restored item so the loading phase
+  // resolves instantly from stored data instead of re-querying OpenRAG.
   useEffect(() => {
     void (async () => {
       try {
@@ -231,6 +236,13 @@ export function useCycle({
         if (!res.ok) return
         const json = await res.json() as { items: BillboardItem[] }
         if (json.items.length > 0) {
+          for (const item of json.items) {
+            cacheRef.current.set(item.query.trim().toLowerCase(), {
+              data: item.data,
+              chatId: item.chatId,
+              audioB64: item.audioB64,
+            })
+          }
           dispatch({ type: 'ITEMS_LOADED', items: json.items })
           dispatch({ type: 'START_NEXT' })
         }
@@ -241,9 +253,6 @@ export function useCycle({
   }, [])
 
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Cache: prevents re-fetching the same question across cycles.
-  const cacheRef = useRef<Map<string, { data: VisualizationData; chatId: string | null; audioB64: string | null }>>(new Map())
 
   const { phase } = state
   const onReadyRef = useRef(onVisualizationReady)
