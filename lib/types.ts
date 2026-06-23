@@ -1,5 +1,7 @@
 export type ChartType = 'line' | 'bar' | 'sparkline' | 'text'
 
+export type EntranceStyle = 'fly-in' | 'dissolve' | 'sparkle' | 'typewriter'
+
 export interface DataPoint {
   label: string
   value: number
@@ -73,6 +75,8 @@ export interface VisualizationData {
   unit?: string
   /** Natural-language music description for ElevenLabs generation */
   musicPrompt: string
+  /** Entrance animation style chosen by the LLM to match the music mood. */
+  entranceStyle?: EntranceStyle
 }
 
 /**

@@ -201,7 +201,6 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
 interface UseCycleOptions {
   dwellSeconds: number
   resumeAfterManualSeconds: number
-  onVisualizationReady?: (data: VisualizationData, audioB64: string | null) => void
   /** When false, the API will skip calling ElevenLabs. */
   musicEnabled?: boolean
 }
@@ -215,7 +214,6 @@ type QueryStreamLine =
 export function useCycle({
   dwellSeconds,
   resumeAfterManualSeconds,
-  onVisualizationReady,
   musicEnabled = true,
 }: UseCycleOptions) {
   const [state, dispatch] = useReducer(reducer, {
@@ -261,9 +259,6 @@ export function useCycle({
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { phase } = state
-  const onReadyRef = useRef(onVisualizationReady)
-  onReadyRef.current = onVisualizationReady
-
   // Track the query currently in-flight so TOKEN_DELTA updates don't re-trigger a fetch.
   const activeQueryRef = useRef<string | null>(null)
 
@@ -373,7 +368,6 @@ export function useCycle({
     const audioB64 = phase.audioB64
     const t = setTimeout(() => {
       dispatch({ type: 'TRANSITION_DONE' })
-      if (onReadyRef.current) onReadyRef.current(phase.next, audioB64)
     }, 1500)
     return () => clearTimeout(t)
   }, [phase])
@@ -448,7 +442,10 @@ export function useCycle({
    * request body as a fallback for items whose DB row may not exist.
    */
   const deleteItem = useCallback((id: string) => {
-    const chatId = stateRef.current.items.find(it => it.id === id)?.chatId ?? null
+    const item = stateRef.current.items.find(it => it.id === id)
+    const chatId = item?.chatId ?? null
+    // Evict from the in-memory cache so the same query re-fetches fresh data.
+    if (item) cacheRef.current.delete(item.query.trim().toLowerCase())
     dispatch({ type: 'ITEM_DELETED', id })
     void fetch(`/api/items/${id}`, {
       method: 'DELETE',

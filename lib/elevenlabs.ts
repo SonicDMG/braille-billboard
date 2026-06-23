@@ -11,7 +11,7 @@ export async function generateMusicAudio(prompt: string): Promise<ArrayBuffer> {
 
   const body = {
     prompt,
-    music_length_ms: 30000,
+    music_length_ms: 10000,
     force_instrumental: true,
   }
 

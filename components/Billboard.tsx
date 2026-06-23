@@ -11,8 +11,19 @@ import { useCycle } from '@/hooks/useCycle'
 import { useBrailleResize } from '@/hooks/useBrailleResize'
 import { useAudio } from '@/hooks/useAudio'
 import { useMusicToggle } from '@/hooks/useMusicToggle'
-import type { VisualizationData } from '@/lib/types'
+import type { EntranceStyle } from '@/lib/types'
 import { billboardConfig } from '@/billboard.config'
+
+// Staggered segment reveal times when music is playing (10 s clip).
+// Segment 0 is immediate; segment 1 lands at the midpoint; segment 2 arrives
+// just before the end so all three are timed to the music arc.
+const MUSIC_SEGMENT_DELAYS_MS = [0, 5000, 8000]
+
+const ENTRANCE_STYLES: EntranceStyle[] = ['fly-in', 'dissolve', 'sparkle', 'typewriter']
+
+function randomEntranceStyle(): EntranceStyle {
+  return ENTRANCE_STYLES[Math.floor(Math.random() * ENTRANCE_STYLES.length)]!
+}
 
 interface BillboardProps {
   missingEnvVars: string[]
@@ -41,28 +52,25 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   // Layout state machine
   const [layout, setLayout] = useState<Layout>('splash')
 
-  // Handle music when a new visualization is ready — audio was generated at query time.
-  const handleVisualizationReady = useCallback((_data: VisualizationData, audioB64: string | null) => {
-    if (!musicEnabled || !audioB64) return
-    try {
-      const bytes = Uint8Array.from(atob(audioB64), c => c.charCodeAt(0))
-      const blob = new Blob([bytes], { type: 'audio/mpeg' })
-      const url = URL.createObjectURL(blob)
-      play(url)
-    } catch {
-      // silent failure
-    }
-  }, [musicEnabled, play])
-
   const { phase, activeIndex, items, submitManualQuery, addItem, deleteItem, jumpTo, triggerDwellDone, lastManualChatIdRef } = useCycle({
     dwellSeconds: billboardConfig.dwellSeconds,
     resumeAfterManualSeconds: billboardConfig.resumeAfterManualSeconds,
-    onVisualizationReady: handleVisualizationReady,
     musicEnabled,
   })
 
   // Keep the ref in sync so the audio onEnded closure always calls the latest version.
   triggerDwellDoneRef.current = triggerDwellDone
+
+  // Stable entrance style for the current displaying phase.
+  // Re-rolled every time we freshly enter 'displaying' (including cycling back
+  // to the same billboard) so repeated visits each get a different animation.
+  const fallbackEntranceRef = useRef<EntranceStyle>('dissolve')
+  const lastPhaseRef = useRef<string>('')
+  const currentPhase = phase.phase
+  if (currentPhase === 'displaying' && lastPhaseRef.current !== 'displaying') {
+    fallbackEntranceRef.current = randomEntranceStyle()
+  }
+  lastPhaseRef.current = currentPhase
 
   // When a manual query completes (manual → transitioning), add it to the billboard list.
   // We track the last manual query string so we can pair it with the resulting VisualizationData.
@@ -91,10 +99,20 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     }
   }, [phase.phase, layout])
 
-  // Stop music on transition
+  // Start music as soon as the billboard begins drawing (transitioning phase),
+  // and stop any previous track first.
   useEffect(() => {
-    if (phase.phase === 'transitioning') stop()
-  }, [phase, stop])
+    if (phase.phase !== 'transitioning') return
+    stop()
+    if (!musicEnabled || !phase.audioB64) return
+    try {
+      const bytes = Uint8Array.from(atob(phase.audioB64), c => c.charCodeAt(0))
+      const blob = new Blob([bytes], { type: 'audio/mpeg' })
+      play(URL.createObjectURL(blob))
+    } catch {
+      // silent failure
+    }
+  }, [phase, musicEnabled, play, stop])
 
   // Keyboard shortcut: Escape collapses to split (if full), '/' opens panel
   useEffect(() => {
@@ -150,11 +168,22 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     phase.phase === 'displaying' ? phase.data.segments :
     phase.phase === 'transitioning' ? phase.next.segments :
     undefined
+  const dotEntranceStyle =
+    phase.phase === 'displaying' ? (phase.data.entranceStyle ?? fallbackEntranceRef.current) :
+    phase.phase === 'transitioning' ? (phase.next.entranceStyle ?? fallbackEntranceRef.current) :
+    undefined
   const dotText =
     phase.phase === 'error' ? 'ERROR' :
     (!dotSegments && phase.phase === 'displaying') ? (phase.data.words ?? phase.data.summary) :
     (!dotSegments && phase.phase === 'transitioning') ? (phase.next.words ?? phase.next.summary) :
     ''
+
+  // Only stagger segment timing when the current billboard has music and it is enabled.
+  const activeAudioB64 =
+    phase.phase === 'transitioning' ? phase.audioB64 :
+    phase.phase === 'displaying' ? (items[activeIndex]?.audioB64 ?? null) :
+    null
+  const dotSegmentDelays = (musicEnabled && activeAudioB64) ? MUSIC_SEGMENT_DELAYS_MS : undefined
 
   // CSS widths for each panel based on layout
   const leftWidth = layout === 'splash' ? '100%' : layout === 'split' ? '25%' : '0%'
@@ -259,6 +288,8 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
             text={dotText}
             loading={isLoadingPhase}
             streamEnergy={streamEnergy}
+            entranceStyle={dotEntranceStyle}
+            segmentDelaysMs={dotSegmentDelays}
           />
         </div>
 

@@ -40,7 +40,8 @@ Search the documents for the answer. Respond with this exact JSON — no prose, 
     { "text": "<SUBJECT NAME — the name of the person, product, or entity this billboard is about. 1 to 3 words maximum. This is the brand signature at the bottom of the billboard.>", "color": { "type": "solid", "hex": "gold" } }
   ],
   "dataPoints": [],
-  "musicPrompt": "<10 words or fewer describing background music, e.g. low ominous strings in a dark hall>"
+  "musicPrompt": "<10 words or fewer describing background music, e.g. low ominous strings in a dark hall>",
+  "entranceStyle": "<one of: fly-in | dissolve | sparkle | typewriter — pick what matches the music mood>"
 }
 
 SEGMENT RULES:
@@ -65,6 +66,12 @@ Rainbow — full hue cycle across the display width:
   { "type": "rainbow" }
   Use sparingly — for celebration, chaos, or when the subject is inherently colorful.
 
+ENTRANCE STYLE GUIDE — choose the style that fits the music and subject mood:
+- fly-in:    fast, urgent, kinetic — matches driving beats, action, breaking news
+- dissolve:  slow, atmospheric — matches ambient, cinematic, orchestral
+- sparkle:   celebratory, electric — matches upbeat, festival, pop, electronic
+- typewriter: deliberate, weighty — matches slow strings, somber, minimal, spoken word
+
 COLOR RULES:
 - Body copy: use solid warm colors (amber, orange, gold) or thematic colors matching the subject.
 - Taglines: use white, a bold contrasting color, or rainbow for maximum impact.
@@ -84,7 +91,8 @@ Example — query: "tell me about Berserker Korg"
     { "text": "BERSERKER KORG",                                                                             "color": { "type": "solid", "hex": "gold" } }
   ],
   "dataPoints": [],
-  "musicPrompt": "heavy war drums building to a crash"
+  "musicPrompt": "heavy war drums building to a crash",
+  "entranceStyle": "fly-in"
 }
 
 If the documents contain NO relevant information:

@@ -1,7 +1,16 @@
 'use client'
 
 import { useEffect, useRef, useState, useLayoutEffect, useCallback } from 'react'
-import type { BillboardSegment, DotColor } from '@/lib/types'
+import type { BillboardSegment, DotColor, EntranceStyle } from '@/lib/types'
+import {
+  flyInEntranceFrames,
+  dissolveEntranceFrames,
+  sparkleEntranceFrames,
+  typewriterEntranceFrames,
+  type AlphaMap,
+  type SegmentBounds,
+  type EntranceOptions,
+} from '@/lib/entrance-animations'
 
 // ---------------------------------------------------------------------------
 // 5×7 bitmap font
@@ -272,6 +281,61 @@ function computeScales(
   return bodyScales
 }
 
+/**
+ * Compute the dot-row range [minRow, maxRow] for each BillboardSegment.
+ * One entry per segment; rows occupied by that segment's word-wrapped lines
+ * are grouped together regardless of how many typography lines it wraps into.
+ * Must be called with the same inputs as buildLitMap.
+ */
+function buildSegmentBounds(
+  segments: BillboardSegment[],
+  cols: number,
+  rows: number,
+): SegmentBounds[] {
+  if (segments.length === 0) return []
+  const scales = computeScales(segments, cols, rows)
+  const lines = buildLines(segments, scales, cols)
+
+  const bounds: SegmentBounds[] = []
+  let rowCursor = 0
+  let segIdx = 0
+  let segStart = 0
+  let segEnd = 0
+  // Track whether we've seen any content for the current segment yet, so that
+  // multiple consecutive blank rows only close the band once.
+  let segHasContent = false
+
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li]!
+    const lineH = CHAR_H * line.scale + 1
+
+    if (!line.text) {
+      // Blank separator row — close the current segment band on the first blank
+      // after content. Subsequent blank rows for the same gap just advance rowCursor.
+      if (segHasContent) {
+        bounds.push({ minRow: segStart, maxRow: segEnd })
+        segIdx++
+        segHasContent = false
+      }
+      rowCursor += lineH
+      segStart = rowCursor
+      segEnd = rowCursor
+      continue
+    }
+
+    segEnd = rowCursor + CHAR_H * line.scale - 1
+    segHasContent = true
+    rowCursor += lineH
+  }
+
+  // Close the final segment.
+  if (segHasContent) {
+    bounds.push({ minRow: segStart, maxRow: segEnd })
+  }
+
+  return bounds
+}
+
 function buildLitMap(
   segments: BillboardSegment[],
   cols: number,
@@ -372,6 +436,23 @@ function computeDotPx(
 }
 
 // ---------------------------------------------------------------------------
+// Entrance generator factory
+// ---------------------------------------------------------------------------
+
+function makeEntranceGenerator(
+  style: EntranceStyle,
+  opts: EntranceOptions,
+): Generator<AlphaMap> {
+  switch (style) {
+    case 'fly-in':     return flyInEntranceFrames(opts)
+    case 'sparkle':    return sparkleEntranceFrames(opts)
+    case 'typewriter': return typewriterEntranceFrames(opts)
+    case 'dissolve':
+    default:           return dissolveEntranceFrames(opts)
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -387,12 +468,27 @@ interface DotMatrixDisplayProps {
    * amplitude and speed without restarting the RAF loop.
    */
   streamEnergy?: number
+  /** Entrance animation style to play when segments first appear. Default: 'dissolve'. */
+  entranceStyle?: EntranceStyle
+  /**
+   * Absolute ms offsets (from when the entrance starts) at which each segment
+   * begins animating in. Index 0 = first segment. When provided, subsequent
+   * segments wait until their scheduled time rather than following immediately
+   * after the previous segment finishes. Unscheduled segments (index beyond the
+   * array) start immediately after the prior one completes.
+   */
+  segmentDelaysMs?: number[]
 }
 
-export function DotMatrixDisplay({ segments, text = '', loading = false, streamEnergy = 0 }: DotMatrixDisplayProps) {
+export function DotMatrixDisplay({ segments, text = '', loading = false, streamEnergy = 0, entranceStyle = 'dissolve', segmentDelaysMs }: DotMatrixDisplayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
+  // Stable ref mirror of dims so effects that must not re-run on resize can read it
+  const dimsRef = useRef<{ w: number; h: number } | null>(null)
+  // Flips to true exactly once when the ResizeObserver first reports a size.
+  // Used as a dep so the entrance-init effect re-runs if segments beat dims.
+  const [dimsReady, setDimsReady] = useState(false)
   const scanRef = useRef(0)
   const rafRef = useRef<number | null>(null)
   // Mutable box so energy can update without restarting the RAF loop
@@ -403,12 +499,44 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
   const streamsRef = useRef<Float32Array | null>(null)
   const streamPhaseRef = useRef<Float32Array | null>(null)
 
+  // ── Entrance animation state ────────────────────────────────────────────────
+  // Per-dot alpha overlay: key = "row,col", value 0–1. Missing = fully lit.
+  const entranceAlphaRef = useRef<AlphaMap>(new Map())
+  // Which segment is currently animating (-1 = all done / not started)
+  const entranceSegRef = useRef<number>(-1)
+  // The active generator for the current segment
+  const entranceGenRef = useRef<Generator<AlphaMap> | null>(null)
+  // Segment bounds derived from the lit map for the current segments
+  const entranceBoundsRef = useRef<SegmentBounds[]>([])
+  // Key to detect when segments change so we restart
+  const entranceKeyRef = useRef<string>('')
+  // Interval for the entrance animation ticks (30 ms)
+  const entranceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Latest lit-key snapshot shared from draw() → entrance interval
+  const entranceLitKeysRef = useRef<Set<string>>(new Set())
+  const entranceColsRef = useRef<number>(0)
+  const entranceRowsRef = useRef<number>(0)
+  // Stable ref to entranceStyle so the interval closure reads the latest value
+  const entranceStyleRef = useRef<EntranceStyle>(entranceStyle)
+  entranceStyleRef.current = entranceStyle
+  // Stable ref to segmentDelaysMs so the interval closure reads the latest value
+  const segmentDelaysMsRef = useRef<number[] | undefined>(segmentDelaysMs)
+  segmentDelaysMsRef.current = segmentDelaysMs
+  // Absolute timestamp (Date.now()) when the current entrance sequence began
+  const entranceStartTimeRef = useRef<number>(0)
+  // Stable ref to draw so the entrance interval can call it without being in its dep array
+  const drawRef = useRef<() => void>(() => {})
+
   useLayoutEffect(() => {
     const el = containerRef.current
     if (!el) return
     const obs = new ResizeObserver(entries => {
       const { width, height } = entries[0]!.contentRect
-      setDims({ w: Math.floor(width), h: Math.floor(height) })
+      const next = { w: Math.floor(width), h: Math.floor(height) }
+      const firstTime = dimsRef.current === null
+      dimsRef.current = next
+      setDims(next)
+      if (firstTime) setDimsReady(true)
     })
     obs.observe(el)
     return () => obs.disconnect()
@@ -448,6 +576,14 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
     const litMap = loading
       ? new Map<string, LitDot>()
       : buildLitMap(effectiveSegments, cols, rows)
+
+    // Keep dim/grid snapshot fresh for the entrance interval
+    if (!loading) {
+      const litKeys = new Set(litMap.keys())
+      entranceLitKeysRef.current = litKeys
+      entranceColsRef.current = cols
+      entranceRowsRef.current = rows
+    }
 
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
@@ -516,20 +652,34 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
             ctx.fill()
           }
         } else if (litDot) {
-          const rgb = resolveColor(litDot.color, c, cols, litDot.segMinCol, litDot.segMaxCol)
-          // Core dot
-          ctx.beginPath()
-          ctx.arc(cx, cy, DOT_PX / 2, 0, Math.PI * 2)
-          ctx.fillStyle = rgbToCss(rgb)
-          ctx.fill()
-          // Radial glow halo
-          const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, DOT_PX * 1.5)
-          grd.addColorStop(0, rgbToGlowCss(rgb, 0.35))
-          grd.addColorStop(1, rgbToGlowCss(rgb, 0))
-          ctx.beginPath()
-          ctx.arc(cx, cy, DOT_PX * 1.5, 0, Math.PI * 2)
-          ctx.fillStyle = grd
-          ctx.fill()
+          // Apply entrance alpha overlay (1 = fully lit, 0 = dark)
+          const entranceAlpha = entranceAlphaRef.current.get(`${r},${c}`) ?? 1
+          if (entranceAlpha <= 0) {
+            // Dot exists but not yet revealed — draw as dim
+            ctx.beginPath()
+            ctx.arc(cx, cy, DOT_PX / 2, 0, Math.PI * 2)
+            ctx.fillStyle = DOT_DIM
+            ctx.fill()
+          } else {
+            const rgb = resolveColor(litDot.color, c, cols, litDot.segMinCol, litDot.segMaxCol)
+            // Core dot — alpha modulated
+            ctx.beginPath()
+            ctx.arc(cx, cy, DOT_PX / 2, 0, Math.PI * 2)
+            ctx.fillStyle = entranceAlpha >= 1
+              ? rgbToCss(rgb)
+              : rgbToGlowCss(rgb, entranceAlpha)
+            ctx.fill()
+            // Radial glow halo — scaled by entrance alpha
+            if (entranceAlpha > 0.1) {
+              const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, DOT_PX * 1.5)
+              grd.addColorStop(0, rgbToGlowCss(rgb, 0.35 * entranceAlpha))
+              grd.addColorStop(1, rgbToGlowCss(rgb, 0))
+              ctx.beginPath()
+              ctx.arc(cx, cy, DOT_PX * 1.5, 0, Math.PI * 2)
+              ctx.fillStyle = grd
+              ctx.fill()
+            }
+          }
         } else {
           ctx.beginPath()
           ctx.arc(cx, cy, DOT_PX / 2, 0, Math.PI * 2)
@@ -538,7 +688,11 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
         }
       }
     }
-  }, [dims, segments, text, loading])
+  }, [dims, segments, text, loading, entranceStyle])
+
+  // Keep drawRef current after every render so the entrance interval always calls
+  // the latest draw without that function being in the interval's dep array.
+  drawRef.current = draw
 
   useEffect(() => {
     if (rafRef.current !== null) {
@@ -592,6 +746,185 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
     }
   }, [loading, draw])
+
+  // ── Entrance initialisation ────────────────────────────────────────────────
+  // Runs when content (segments / text / entranceStyle / loading) changes, and
+  // also once when dimsReady flips true so content that arrived before the first
+  // ResizeObserver callback still gets initialised.
+  // dimsReady never goes back to false, so it only adds one extra run ever.
+  // Full dims object is intentionally absent from deps — a pure resize must not
+  // reset the animation, and the dep-array size must stay constant.
+  useEffect(() => {
+    if (loading) return
+    const d = dimsRef.current
+    if (!d) return
+
+    const effectiveSegments: BillboardSegment[] =
+      segments && segments.length > 0
+        ? segments
+        : text
+          ? [{ text, color: { type: 'solid', hex: '#ff6600' } }]
+          : []
+
+    if (effectiveSegments.length === 0) return
+
+    // Only reset when the actual content (or style) has changed — not on resize.
+    const newKey = `${entranceStyle}|${effectiveSegments.map(s => s.text).join('|')}`
+    if (newKey === entranceKeyRef.current) return
+
+    const DOT_PX = computeDotPx(d.w, d.h, effectiveSegments)
+    const STEP = DOT_PX + GAP_PX
+    const cols = Math.floor((d.w + GAP_PX) / STEP)
+    const rows = Math.floor((d.h + GAP_PX) / STEP)
+    if (cols <= 0 || rows <= 0) return
+
+    const litMap = buildLitMap(effectiveSegments, cols, rows)
+    const litKeys = new Set(litMap.keys())
+
+    // Pre-populate every lit dot at alpha=0 so the very first draw() after this
+    // reset renders a dark canvas. Without this, missing keys default to 1 (fully
+    // lit), so the first synchronous draw() paints everything bright before the
+    // interval has produced even one animation frame.
+    const initialAlpha: AlphaMap = new Map()
+    for (const key of litKeys) initialAlpha.set(key, 0)
+
+    entranceAlphaRef.current = initialAlpha
+    entranceLitKeysRef.current = litKeys
+    entranceColsRef.current = cols
+    entranceRowsRef.current = rows
+
+    const bounds = buildSegmentBounds(effectiveSegments, cols, rows)
+    entranceBoundsRef.current = bounds
+    entranceSegRef.current = bounds.length > 0 ? 0 : -1
+    entranceGenRef.current = bounds.length > 0
+      ? makeEntranceGenerator(entranceStyle, { cols, rows, litKeys, bounds: bounds[0]! })
+      : null
+    entranceKeyRef.current = newKey
+    // Record the wall-clock time this entrance sequence started so the interval
+    // can compare against segmentDelaysMs offsets.
+    entranceStartTimeRef.current = Date.now()
+  }, [segments, text, entranceStyle, loading, dimsReady])
+
+  // ── Entrance animation interval ────────────────────────────────────────────
+  // Runs at 30 ms when segments are active. Advances the active segment's
+  // generator, checks 70% completion to stagger to the next segment.
+  // When segmentDelaysMs is set, subsequent segments also wait until their
+  // scheduled time offset (measured from entranceStartTimeRef) before starting.
+  useEffect(() => {
+    if (loading) {
+      // Clear any active entrance when we enter loading phase
+      if (entranceIntervalRef.current) {
+        clearInterval(entranceIntervalRef.current)
+        entranceIntervalRef.current = null
+      }
+      return
+    }
+
+    // Start the interval
+    entranceIntervalRef.current = setInterval(() => {
+      const segIdx = entranceSegRef.current
+      if (segIdx < 0) return  // all done
+
+      const gen = entranceGenRef.current
+      if (!gen) {
+        // Parked: waiting for this segment's scheduled start time.
+        // Check every tick whether the time has arrived and, if so, start it.
+        const delays = segmentDelaysMsRef.current
+        const scheduledDelay = delays?.[segIdx]
+        if (scheduledDelay !== undefined) {
+          const elapsed = Date.now() - entranceStartTimeRef.current
+          if (elapsed >= scheduledDelay) {
+            const nextBounds = entranceBoundsRef.current[segIdx]
+            if (nextBounds) {
+              entranceGenRef.current = makeEntranceGenerator(entranceStyleRef.current, {
+                cols: entranceColsRef.current,
+                rows: entranceRowsRef.current,
+                litKeys: entranceLitKeysRef.current,
+                bounds: nextBounds,
+              })
+            }
+          }
+        }
+        drawRef.current()
+        return
+      }
+
+      const result = gen.next()
+      if (result.done) return
+
+      const frame = result.value
+      // Merge frame into the alpha map
+      for (const [key, alpha] of frame) {
+        entranceAlphaRef.current.set(key, alpha)
+      }
+
+      // Check 70% completion for the current segment to trigger stagger
+      const bounds = entranceBoundsRef.current[segIdx]
+      if (bounds) {
+        const litKeys = entranceLitKeysRef.current
+        let total = 0
+        let settled = 0
+        for (const key of litKeys) {
+          const r = parseInt(key.split(',')[0]!, 10)
+          if (r >= bounds.minRow && r <= bounds.maxRow) {
+            total++
+            if ((entranceAlphaRef.current.get(key) ?? 1) >= 0.99) settled++
+          }
+        }
+        const pct = total > 0 ? settled / total : 1
+
+        if (pct >= 0.7) {
+          // Snap remaining dots in this segment to fully lit
+          for (const key of litKeys) {
+            const r = parseInt(key.split(',')[0]!, 10)
+            if (r >= bounds.minRow && r <= bounds.maxRow) {
+              entranceAlphaRef.current.set(key, 1)
+            }
+          }
+
+          // Advance to next segment
+          const nextIdx = segIdx + 1
+          const nextBounds = entranceBoundsRef.current[nextIdx]
+          if (nextBounds) {
+            entranceSegRef.current = nextIdx
+            const delays = segmentDelaysMsRef.current
+            const scheduledDelay = delays?.[nextIdx]
+            const elapsed = Date.now() - entranceStartTimeRef.current
+            if (scheduledDelay !== undefined && elapsed < scheduledDelay) {
+              // Not yet time — park with no generator; the interval will keep
+              // polling until the scheduled moment arrives, then start it.
+              entranceGenRef.current = null
+            } else {
+              const litKeys2 = entranceLitKeysRef.current
+              entranceGenRef.current = makeEntranceGenerator(entranceStyleRef.current, {
+                cols: entranceColsRef.current,
+                rows: entranceRowsRef.current,
+                litKeys: litKeys2,
+                bounds: nextBounds,
+              })
+            }
+          } else {
+            // All segments complete
+            entranceSegRef.current = -1
+            entranceGenRef.current = null
+            if (entranceIntervalRef.current) {
+              clearInterval(entranceIntervalRef.current)
+              entranceIntervalRef.current = null
+            }
+          }
+        }
+      }
+
+      drawRef.current()
+    }, 30)
+
+    return () => {
+      if (entranceIntervalRef.current) {
+        clearInterval(entranceIntervalRef.current)
+        entranceIntervalRef.current = null
+      }
+    }
+  }, [loading])
 
   return (
     <div
