@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { streamForVisualization } from '@/lib/openrag'
 import { parseVisualizationData } from '@/lib/parse-viz'
+import { generatePortraitSprite } from '@/lib/everart'
 
 export const runtime = 'nodejs'
 
@@ -77,6 +78,16 @@ export async function POST(req: NextRequest) {
           console.error('[/api/query] raw was:\n', accumulated)
           send({ type: 'error', message: parseErr instanceof Error ? parseErr.message : String(parseErr) })
           return
+        }
+
+        // Generate EverArt portrait — non-blocking best-effort: attach if it
+        // succeeds, send the result either way without delaying the response.
+        try {
+          const spriteData = await generatePortraitSprite(data.title, data.visualDescription)
+          data.generatedSpriteData = spriteData
+          console.log('[/api/query] EverArt sprite ready, keys:', Object.keys(spriteData).length)
+        } catch (imgErr) {
+          console.warn('[/api/query] EverArt generation failed (non-fatal):', imgErr instanceof Error ? imgErr.message : imgErr)
         }
 
         send({ type: 'result', data, chatId, audioB64: null })

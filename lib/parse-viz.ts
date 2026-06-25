@@ -5,10 +5,11 @@ const VALID_ENTRANCE_STYLES = new Set<string>(['fly-in', 'dissolve', 'sparkle', 
 const MAX_DATA_POINTS = 24
 
 // Word budget — mirrors the hard caps in the LLM prompt.
-const MAX_WORDS_BODY    = 25   // body segment(s)
-const MAX_WORDS_TAGLINE = 8    // middle tagline segment (optional)
+// Body is kept tight so text wraps cleanly in the narrower left column.
+const MAX_WORDS_BODY    = 12   // body segment(s)
+const MAX_WORDS_TAGLINE = 6    // middle tagline segment (optional)
 const MAX_WORDS_SUBJECT = 3    // final subject-name segment
-const MAX_WORDS_TOTAL   = 35   // across all segments combined
+const MAX_WORDS_TOTAL   = 20   // across all segments combined
 
 /** Truncate to at most `limit` words, appending "…" if cut. */
 function truncateWords(text: string, limit: number): string {
@@ -218,7 +219,7 @@ export function parseVisualizationData(raw: string): VisualizationData {
       segments,
       words: segments.map(s => s.text).join(' '),
       entranceStyle: parseEntranceStyle(json.entranceStyle),
-      portraitColors: parsePortraitColors(json.portraitColors),
+      visualDescription: parseVisualDescription(json.visualDescription),
     }
   }
 
@@ -253,20 +254,9 @@ function parseEntranceStyle(raw: unknown): EntranceStyle {
   return 'dissolve'
 }
 
-/**
- * Parse an optional portraitColors array from the LLM response.
- * Accepts an array of 1–4 strings, each a valid hex or named color.
- * Returns undefined if absent, empty, or all entries are invalid.
- */
-function parsePortraitColors(raw: unknown): string[] | undefined {
-  if (!Array.isArray(raw) || raw.length === 0) return undefined
-  const colors: string[] = []
-  for (const entry of raw.slice(0, 4)) {
-    if (typeof entry !== 'string') continue
-    const hex = resolveHex(entry)
-    if (hex) colors.push(hex)
-  }
-  return colors.length > 0 ? colors : undefined
+function parseVisualDescription(raw: unknown): string | undefined {
+  if (typeof raw !== 'string' || raw.trim() === '') return undefined
+  return raw.trim()
 }
 
 // ---------------------------------------------------------------------------

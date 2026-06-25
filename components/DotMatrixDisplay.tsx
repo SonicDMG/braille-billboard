@@ -82,6 +82,10 @@ const GAP_PX  = 2  // physical pixels between dots
 // Blank dot-rows inserted between segments
 const SEGMENT_GAP_ROWS = 2
 
+// Fraction of total dot-columns reserved for the image when one is present.
+// Text is constrained to the remaining left portion; image fills the right.
+const IMAGE_COL_FRACTION = 0.52
+
 // Unlit dot color
 const DOT_DIM = '#1a0500'
 
@@ -193,7 +197,7 @@ interface RenderedLine {
  *
  * @param segments    Text-only billboard segments (each may have a different scale)
  * @param scales      Per-segment integer scale factor (parallel array to segments)
- * @param colDotWidth Available dot-columns for the widest scale=1 row
+ * @param colDotWidth Available dot-columns for all segments
  */
 function buildLines(
   segments: BillboardSegmentText[],
@@ -299,10 +303,12 @@ function buildSegmentBounds(
   segments: BillboardSegmentText[],
   cols: number,
   rows: number,
+  hasImage = false,
 ): SegmentBounds[] {
   if (segments.length === 0) return []
-  const scales = computeScales(segments, cols, rows)
-  const lines = buildLines(segments, scales, cols)
+  const colDotWidth = hasImage ? Math.floor(cols * (1 - IMAGE_COL_FRACTION)) : cols
+  const scales = computeScales(segments, colDotWidth, rows)
+  const lines = buildLines(segments, scales, colDotWidth)
 
   const bounds: SegmentBounds[] = []
   let rowCursor = 0
@@ -363,45 +369,26 @@ interface SpriteRegion {
 }
 
 /**
- * Decide where to place a sprite/portrait block given the committed text layout.
+ * Compute the image region when an imageSeg is present.
  *
- * Prefers 'beside' (right of text) when ≥ 16 dot-columns are free and the text
- * uses at least 8 dot-rows, otherwise falls back to 'below'.
+ * The image always occupies the right IMAGE_COL_FRACTION of the total canvas,
+ * full height. Text is pre-constrained to the left portion in buildLitMap and
+ * computeDotPx, so there is never a text/image overlap.
  */
 function computeSpriteRegion(
-  lines: RenderedLine[],
+  _lines: RenderedLine[],
   cols: number,
   rows: number,
-  usedDotRows: number,
+  _usedDotRows: number,
 ): SpriteRegion {
-  // Width of the widest text line in dot-columns
-  let maxLineColWidth = 0
-  for (const line of lines) {
-    if (!line.text) continue
-    const charStep = (CHAR_W + GAP) * line.scale
-    const lineWidth = line.text.length * charStep - GAP * line.scale
-    if (lineWidth > maxLineColWidth) maxLineColWidth = lineWidth
-  }
-
-  const asideWidth = cols - maxLineColWidth - SEGMENT_GAP_ROWS
-  const belowHeight = rows - usedDotRows - SEGMENT_GAP_ROWS
-
-  if (asideWidth >= 16 && usedDotRows >= 8) {
-    return {
-      mode: 'beside',
-      colOffset: maxLineColWidth + SEGMENT_GAP_ROWS,
-      colWidth: asideWidth,
-      rowOffset: 0,
-      rowHeight: usedDotRows,
-    }
-  }
-
+  const textCols = Math.floor(cols * (1 - IMAGE_COL_FRACTION))
+  const imgCols  = cols - textCols
   return {
-    mode: 'below',
-    colOffset: 0,
-    colWidth: cols,
-    rowOffset: usedDotRows + SEGMENT_GAP_ROWS,
-    rowHeight: Math.max(0, belowHeight),
+    mode: 'beside',
+    colOffset: textCols,
+    colWidth:  imgCols,
+    rowOffset: 0,
+    rowHeight: rows,
   }
 }
 
@@ -501,8 +488,9 @@ function buildLitMap(
   const lit = new Map<string, LitDot>()
   if (segments.length === 0 && !imageSeg) return lit
 
-  // dot-column budget
-  const colDotWidth = cols
+  // When an image is present, all text is constrained to the left column so
+  // the image owns the full right portion at full canvas height.
+  const colDotWidth = imageSeg ? Math.floor(cols * (1 - IMAGE_COL_FRACTION)) : cols
 
   const scales = computeScales(segments, colDotWidth, rows)
   const lines = buildLines(segments, scales, colDotWidth)
@@ -593,26 +581,14 @@ function computeDotPx(
 
     if (segments.length === 0 && !imageSeg) return dotPx  // loading — any size works
 
-    const scales = computeScales(segments, cols, rows)
-    const lines = buildLines(segments, scales, cols)
+    // When an image is present, all text is constrained to the left column.
+    const colDotWidth = imageSeg ? Math.floor(cols * (1 - IMAGE_COL_FRACTION)) : cols
+    const scales = computeScales(segments, colDotWidth, rows)
+    const lines = buildLines(segments, scales, colDotWidth)
     const textRows = totalDotRows(lines)
 
-    if (!imageSeg) {
-      if (textRows <= rows) return dotPx
-      continue
-    }
-
-    // Estimate image rows: if the image would go 'beside', it costs 0 extra rows;
-    // if 'below', it needs at least its own dot-rows.
-    const region = computeSpriteRegion(lines, cols, rows, textRows)
-    if (region.mode === 'beside') {
-      if (textRows <= rows) return dotPx
-    } else {
-      // Portrait/sprite aspect ratio approximation: assume square-ish (1:1)
-      const imgCols = cols
-      const imgRows = imgCols  // worst case estimate
-      if (textRows + SEGMENT_GAP_ROWS + imgRows <= rows) return dotPx
-    }
+    // Text must fit within total rows regardless of image layout.
+    if (textRows <= rows) return dotPx
   }
 
   return MIN_DOT
@@ -985,7 +961,7 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
     entranceColsRef.current = cols
     entranceRowsRef.current = rows
 
-    const bounds = buildSegmentBounds(effectiveSegments, cols, rows)
+    const bounds = buildSegmentBounds(effectiveSegments, cols, rows, !!imageSeg)
     entranceBoundsRef.current = bounds
 
     if (bounds.length > 0) {

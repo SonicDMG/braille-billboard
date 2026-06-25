@@ -35,21 +35,27 @@ Search the documents for the answer. Respond with this exact JSON — no prose, 
   "title": "<the billboard headline — 2 to 6 words, punchy, printed 10 feet tall>",
   "summary": "<one sentence. The kind a driver reads at 60mph and remembers.>",
   "segments": [
-    { "text": "<body copy — 1 to 3 sentences. Use rhythm, parallel structure, or alliteration. Rhyme only if it serves the meaning.>", "color": { "type": "solid", "hex": "amber" } },
-    { "text": "<tagline — 3 to 7 words. Short. Punchy. Impossible to forget.>",       "color": { "type": "solid", "hex": "white" } },
+    { "text": "<body copy — 1 to 2 sentences maximum. 12 words or fewer. Punchy rhythm.>", "color": { "type": "solid", "hex": "amber" } },
+    { "text": "<tagline — 3 to 6 words. Short. Impossible to forget.>",                    "color": { "type": "solid", "hex": "white" } },
     { "text": "<SUBJECT NAME — the name of the person, product, or entity this billboard is about. 1 to 3 words maximum. This is the brand signature at the bottom of the billboard.>", "color": { "type": "solid", "hex": "gold" } }
   ],
   "dataPoints": [],
   "entranceStyle": "<one of: fly-in | dissolve | sparkle | typewriter>",
-  "portraitColors": ["#hex1", "#hex2"]
+  "visualDescription": "<1–2 sentences describing what the subject looks like — appearance, colors, defining features. Written for an image-generation model, not a reader. Omit for abstract or data queries.>"
 }
 
 SEGMENT RULES:
 - The LAST segment is always the subject name — the entity this billboard is about (a product, person, place, concept).
   It must be 1 to 3 words. It is the brand signature. It always appears.
-- The FIRST segment is body copy — the facts, told with rhythm. Use parallel structure, alliteration, or punchy cadence. Rhyme only if it serves the meaning. 1 to 3 sentences.
-- The MIDDLE segment (optional) is the tagline — punchy, 3 to 7 words. Use only when it genuinely adds impact.
+- The FIRST segment is body copy — the facts, told with rhythm. 1 to 2 sentences. 12 words maximum.
+- The MIDDLE segment (optional) is the tagline — punchy, 3 to 6 words. Use only when it genuinely adds impact.
 - Total segments: 2 (body + subject) or 3 (body + tagline + subject).
+
+VISUAL DESCRIPTION RULES:
+- Include "visualDescription" only when the subject has a concrete visual form (a character, creature, object, place, or person).
+- Describe appearance: silhouette, dominant colors, textures, defining features (weapon, clothing, face, markings).
+- Write for an image-generation model. Be specific. No metaphors. No narrative. Just visual facts.
+- Omit the field entirely for abstract concepts, statistics, or data queries.
 
 COLOR GUIDE — choose the color that serves the copy:
 
@@ -65,16 +71,6 @@ Gradient — sweeps left to right across the segment:
 Rainbow — full hue cycle across the display width:
   { "type": "rainbow" }
   Use sparingly — for celebration, chaos, or when the subject is inherently colorful.
-
-PORTRAIT GUIDE — include portraitColors only for character, creature, or entity queries
-where you found a clear colour palette in the IMAGE GENERATION DETAILS:
-- Pick 2–4 dominant colors from the palette description, ordered top-to-bottom
-  (e.g. sky color → midground → character → foreground/ground).
-- Use CSS hex strings or the named colors above.
-- Omit the field entirely for data, topic, or abstract queries with no visual character.
-
-Example for a character with warm earth tones and vibrant accents:
-"portraitColors": ["#1a3a5c", "#c8843a", "#8b1a1a", "#3d2b1a"]
 
 ENTRANCE STYLE GUIDE — choose the style that fits the subject mood:
 - fly-in:    fast, urgent, kinetic — action, breaking news
@@ -101,18 +97,17 @@ Example — query: "tell me about Berserker Korg"
     { "text": "BERSERKER KORG",                                                                             "color": { "type": "solid", "hex": "gold" } }
   ],
   "dataPoints": [],
-  "entranceStyle": "fly-in",
-  "portraitColors": ["#1a3a1a", "#8b6914", "#5c1a1a", "#3d2b0a"]
+  "entranceStyle": "fly-in"
 }
 
 If the documents contain NO relevant information:
 { "found": false, "reason": "<one sentence>" }
 
-WORD LIMITS — the display is physically finite. Respect these hard caps:
-- Body segment: 25 words maximum.
-- Tagline segment (middle, optional): 8 words maximum.
+WORD LIMITS — text shares the display with a large portrait image. Keep it tight:
+- Body segment: 12 words maximum.
+- Tagline segment (middle, optional): 6 words maximum.
 - Subject name segment (last): 3 words maximum.
-- Total across ALL segments combined: 35 words maximum.
+- Total across ALL segments combined: 20 words maximum.
 - Count every word before you write the JSON. If you are over, cut — do not compress or hyphenate.
 
 Rules:
@@ -129,11 +124,22 @@ Rules:
  * Pattern mirrors killrctx: await the connection setup, then the caller
  * drains events with `for await`. The SDK's ChatStream handles cleanup.
  */
-export function streamForVisualization(query: string): Promise<AsyncIterable<StreamEvent>> {
+export async function streamForVisualization(query: string): Promise<AsyncIterable<StreamEvent>> {
   const client = getClient()
   const message = buildVisualizationMessage(query)
   console.log('[openrag] → streaming query:', query)
-  return client.chat.stream({ message })
+  const stream = await client.chat.stream({ message })
+
+  async function* withDebugLog(): AsyncIterable<StreamEvent> {
+    let accumulated = ''
+    for await (const event of stream) {
+      if (event.type === 'content') accumulated += event.delta
+      yield event
+    }
+    console.log('[openrag] ← LLM response:\n', accumulated)
+  }
+
+  return withDebugLog()
 }
 
 /**

@@ -9,7 +9,7 @@ import { SetupScreen } from './SetupScreen'
 import { BillboardList } from './BillboardList'
 import { useCycle } from '@/hooks/useCycle'
 import { useBrailleResize } from '@/hooks/useBrailleResize'
-import type { BillboardSegmentSprite, BillboardSegmentPortrait, EntranceStyle } from '@/lib/types'
+import type { BillboardSegmentSprite, EntranceStyle } from '@/lib/types'
 import { spriteDataToMap } from '@/lib/image-to-sprite'
 import { billboardConfig } from '@/billboard.config'
 
@@ -158,7 +158,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
 
   // Derive imageSeg for the active billboard item:
   //   1. User-uploaded sprite takes priority.
-  //   2. Fall back to LLM-provided portraitColors.
+  //   2. Fall back to EverArt-generated sprite attached to the VisualizationData.
   //   3. Otherwise undefined (no image block).
   const activeItem = items[activeIndex]
   const activeData =
@@ -169,22 +169,15 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   // Memoize spriteDataToMap so the Map reference is stable between renders —
   // DotMatrixDisplay uses imageSeg as a useEffect dep, and a new Map object
   // on every render would continuously restart the entrance animation.
-  // The reducer replaces the spriteData object reference only when the sprite
-  // actually changes (ITEM_SPRITE_SET), so reference identity is the right dep.
-  const activeSpriteData = activeItem?.spriteData ?? null
+  const activeSpriteData = activeItem?.spriteData ?? activeData?.generatedSpriteData ?? null
   const spriteMap = useMemo(
     () => activeSpriteData ? spriteDataToMap(activeSpriteData) : null,
     [activeSpriteData],
   )
 
-  let dotImageSeg: BillboardSegmentSprite | BillboardSegmentPortrait | undefined
+  let dotImageSeg: BillboardSegmentSprite | undefined
   if (spriteMap) {
     dotImageSeg = { type: 'sprite', spriteMap }
-  } else if (activeData?.portraitColors && activeData.portraitColors.length > 0) {
-    dotImageSeg = {
-      type: 'portrait',
-      colors: activeData.portraitColors,
-    }
   }
 
   // CSS widths for each panel based on layout
