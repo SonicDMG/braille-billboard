@@ -47,12 +47,13 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   })
 
   // Stable entrance style for the current displaying phase.
-  // Re-rolled every time we freshly enter 'displaying' (including cycling back
-  // to the same billboard) so repeated visits each get a different animation.
+  // Re-rolled when we freshly enter 'transitioning' so the style is locked in
+  // before DotMatrixDisplay first sees the new content — avoiding a mid-entrance
+  // style change that resets the animation to alpha=0 (blank flash).
   const fallbackEntranceRef = useRef<EntranceStyle>('dissolve')
   const lastPhaseRef = useRef<string>('')
   const currentPhase = phase.phase
-  if (currentPhase === 'displaying' && lastPhaseRef.current !== 'displaying') {
+  if (currentPhase === 'transitioning' && lastPhaseRef.current !== 'transitioning') {
     fallbackEntranceRef.current = randomEntranceStyle()
   }
   lastPhaseRef.current = currentPhase
@@ -147,8 +148,8 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     phase.phase === 'transitioning' ? phase.next.segments :
     undefined
   const dotEntranceStyle =
-    phase.phase === 'displaying' ? (phase.data.entranceStyle ?? fallbackEntranceRef.current) :
-    phase.phase === 'transitioning' ? (phase.next.entranceStyle ?? fallbackEntranceRef.current) :
+    phase.phase === 'displaying' ? fallbackEntranceRef.current :
+    phase.phase === 'transitioning' ? fallbackEntranceRef.current :
     undefined
   const dotText =
     phase.phase === 'error' ? 'ERROR' :
