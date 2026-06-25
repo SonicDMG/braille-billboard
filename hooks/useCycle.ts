@@ -470,7 +470,7 @@ export function useCycle({
   const setItemSprite = useCallback(async (id: string, file: File) => {
     const SPRITE_COLS = 40
     try {
-      const spriteMap = await imageToSprite(file, SPRITE_COLS)
+      const spriteMap = await imageToSprite(file, SPRITE_COLS, { maskBackground: true })
       const spriteData = spriteMapToData(spriteMap)
       dispatch({ type: 'ITEM_SPRITE_SET', id, spriteData })
       void fetch(`/api/items/${id}`, {
