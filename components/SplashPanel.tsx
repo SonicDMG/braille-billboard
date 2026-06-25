@@ -191,13 +191,15 @@ export function SplashPanel({
         </form>
       )}
 
-      {/* Braille sine wave — fills available space */}
+      {/* Braille sine wave — fills available space, always centred vertically */}
       <div
         style={{
           flex: 1,
           overflow: 'hidden',
           opacity: waveOpacity,
           transition: 'opacity 0.6s',
+          display: 'flex',
+          alignItems: 'center',
         }}
       >
         <BrailleDisplay frame={frame} fontSize={fontSize} color="#ffffff" />
