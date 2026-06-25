@@ -97,7 +97,7 @@ Example — query: "tell me about Berserker Korg"
     { "text": "BERSERKER KORG",                                                                             "color": { "type": "solid", "hex": "gold" } }
   ],
   "dataPoints": [],
-  "entranceStyle": "fly-in"
+  "entranceStyle": "sparkle"
 }
 
 If the documents contain NO relevant information:

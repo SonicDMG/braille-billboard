@@ -149,8 +149,8 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     phase.phase === 'transitioning' ? phase.next.segments :
     undefined
   const dotEntranceStyle =
-    phase.phase === 'displaying' ? fallbackEntranceRef.current :
-    phase.phase === 'transitioning' ? fallbackEntranceRef.current :
+    phase.phase === 'displaying' ? (phase.data.entranceStyle ?? fallbackEntranceRef.current) :
+    phase.phase === 'transitioning' ? (phase.next.entranceStyle ?? fallbackEntranceRef.current) :
     undefined
   const dotText =
     phase.phase === 'error' ? 'ERROR' :
