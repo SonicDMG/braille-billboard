@@ -767,16 +767,16 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
             streamPhaseRef.current = new Float32Array(cols)
             for (let i = 0; i < cols; i++) {
               // Stagger starting positions so columns don't move in lockstep.
-              // Each stream begins somewhere in the top half, moving downward.
-              streamsRef.current[i] = (i / cols) * (rows * 0.5)
+              // Each stream begins somewhere across the full height, moving downward.
+              streamsRef.current[i] = (i / cols) * rows
               streamPhaseRef.current![i] = (i * 1.618033) % 1  // golden ratio spread
             }
           }
 
-          // Each stream head falls from row 0 toward the vertical center (rows/2).
-          // At the center it wraps back to row 0 to restart the descent.
+          // Each stream head falls from row 0 to the bottom (rows).
+          // At the bottom it wraps back to row 0 to restart the descent.
           const headRow = streamsRef.current[c]!
-          const midRow = rows / 2
+          const midRow = rows
 
           // Tail length: tighter at low energy (3 rows), longer at peak (8 rows).
           const tail = 3 + e * 5
@@ -793,7 +793,7 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
 
           // Center-pull: dots closest to the vertical midpoint get a subtle boost
           // so the display feels like data converging on the center.
-          const centerBoost = 1 - Math.abs(r - midRow) / (rows * 0.6)
+          const centerBoost = 1 - Math.abs(r - rows / 2) / (rows * 0.6)
           brightness *= Math.max(0.5, centerBoost)
           brightness = Math.min(1, brightness)
 
@@ -878,8 +878,6 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
             const STEP_l = DOT_PX_l + GAP_PX
             const cols_l = Math.floor((d.w + GAP_PX) / STEP_l)
             const rows_l = Math.floor((d.h + GAP_PX) / STEP_l)
-            const midRow = rows_l / 2
-
             for (let c = 0; c < cols_l && c < streams.length; c++) {
               // Each column falls at a slightly different speed — phase offset
               // creates a rain-like cascade rather than a uniform wall.
@@ -887,9 +885,8 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
               const speed = (0.18 + e * 0.37) * (0.7 + phases[c]! * 0.6)
               streams[c] = (streams[c]! + speed)
 
-              // Wrap at the center: head resets to 0 once it passes midRow,
-              // keeping all streams converging toward the midpoint.
-              if (streams[c]! > midRow + 1) {
+              // Wrap at the bottom: head resets to 0 once it passes the last row.
+              if (streams[c]! > rows_l + 1) {
                 streams[c] = 0
               }
             }
