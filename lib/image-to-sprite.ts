@@ -1,9 +1,13 @@
 /**
  * image-to-sprite.ts
  *
- * Browser-only utility.  Converts a raster image (PNG/JPEG) to a SpriteMap —
+ * Browser-only utility.  Converts a raster image (PNG/JPEG/SVG) to a SpriteMap —
  * a sparse Map<"row,col", hexColor> that the dot-matrix renderer can merge
  * directly into its lit map.
+ *
+ * SVG files are handled the same way as raster images: the browser renders the
+ * SVG into an HTMLImageElement and the canvas 2D context rasterises it at the
+ * target dot-column size.  Transparent pixels (alpha < 128) are skipped.
  *
  * Do NOT import this module in any server-side code; it depends on
  * HTMLImageElement, HTMLCanvasElement, and URL.createObjectURL.
@@ -12,11 +16,11 @@
 import type { SpriteMap, SpriteData } from './types'
 
 /**
- * Convert a raster image file (PNG or JPEG) to a SpriteMap at the target
+ * Convert an image file (PNG, JPEG, or SVG) to a SpriteMap at the target
  * dot-column width.  Aspect ratio is preserved.  Transparent pixels
  * (alpha < 128) produce no entry in the map.
  *
- * @param file     PNG or JPEG File from an <input type="file"> element
+ * @param file     PNG, JPEG, or SVG File from an <input type="file"> element
  * @param dotCols  Target sprite width in dot-columns
  * @returns        SpriteMap — entries only for non-transparent pixels
  */

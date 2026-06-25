@@ -55,7 +55,7 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/png,image/jpeg"
+        accept="image/png,image/jpeg,image/svg+xml"
         style={{ display: 'none' }}
         onChange={handleFileChange}
       />
