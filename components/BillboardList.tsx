@@ -64,7 +64,7 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
         style={{
           fontFamily: "'Courier New', monospace",
           fontSize: `${xs}px`,
-          color: '#2a2a2a',
+          color: '#555555',
           letterSpacing: 2,
           paddingBottom: 4,
           flexShrink: 0,
@@ -88,9 +88,9 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
               alignItems: 'center',
               gap: 6,
               padding: '4px 6px',
-              border: `1px solid ${isActive ? '#333333' : '#1a1a1a'}`,
+              border: `1px solid ${isActive ? '#4a4a4a' : '#2a2a2a'}`,
               borderRadius: 2,
-              background: isActive ? '#0d0d0d' : 'transparent',
+              background: isActive ? '#111111' : 'transparent',
               transition: 'background 0.3s, border-color 0.3s',
               flexShrink: 0,
               cursor: isActive ? 'default' : 'pointer',
@@ -99,12 +99,12 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
             {/* Active indicator */}
             <span
               style={{
-                fontFamily: "'Courier New', monospace",
-                fontSize: `${xs}px`,
-                color: isActive ? '#555555' : '#222222',
-                flexShrink: 0,
-                transition: 'color 0.3s',
-              }}
+                  fontFamily: "'Courier New', monospace",
+                  fontSize: `${xs}px`,
+                  color: isActive ? '#888888' : '#555555',
+                  flexShrink: 0,
+                  transition: 'color 0.3s',
+                }}
             >
               {isActive ? '⠿' : '·'}
             </span>
@@ -112,15 +112,15 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
             {/* Query label */}
             <span
               style={{
-                fontFamily: "'Courier New', monospace",
-                fontSize: `${sm}px`,
-                color: isActive ? '#888888' : isHovered ? '#666666' : '#444444',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                flex: 1,
-                transition: 'color 0.3s',
-              }}
+                  fontFamily: "'Courier New', monospace",
+                  fontSize: `${sm}px`,
+                  color: isActive ? '#cccccc' : isHovered ? '#999999' : '#777777',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  flex: 1,
+                  transition: 'color 0.3s',
+                }}
               title={item.query}
             >
               {item.query}
@@ -136,7 +136,7 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: hasSprite ? '#886622' : '#333333',
+                    color: hasSprite ? '#aa8833' : '#555555',
                     fontFamily: "'Courier New', monospace",
                     fontSize: `${xs}px`,
                     cursor: 'pointer',
@@ -146,7 +146,7 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
                     transition: 'color 0.15s',
                   }}
                   onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc9933' }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = hasSprite ? '#886622' : '#333333' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = hasSprite ? '#aa8833' : '#555555' }}
                 >
                   {hasSprite ? '⊙' : '⊕'}
                 </button>
@@ -159,7 +159,7 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
                     style={{
                       background: 'none',
                       border: 'none',
-                      color: '#333333',
+                      color: '#555555',
                       fontFamily: "'Courier New', monospace",
                       fontSize: `${xs}px`,
                       cursor: 'pointer',
@@ -169,7 +169,7 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
                       transition: 'color 0.15s',
                     }}
                     onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc6644' }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#333333' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
                   >
                     ⊘
                   </button>
@@ -184,7 +184,7 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
               style={{
                 background: 'none',
                 border: 'none',
-                color: '#333333',
+                color: '#555555',
                 fontFamily: "'Courier New', monospace",
                 fontSize: `${xs}px`,
                 cursor: 'pointer',
@@ -194,7 +194,7 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
                 transition: 'color 0.15s',
               }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc4444' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#333333' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
             >
               ✕
             </button>

@@ -92,7 +92,7 @@ export function SplashPanel({
 
   const showInput = mode === 'splash' || mode === 'split'
   const showCollapseBtn = mode === 'split'
-  const waveOpacity = mode === 'splash' ? 0.55 : 0.2
+  const waveOpacity = mode === 'splash' ? 0.75 : 0.5
 
   return (
     <div
@@ -148,13 +148,13 @@ export function SplashPanel({
         >
           <div
             style={{
-              fontFamily: "'Courier New', monospace",
-              fontSize: `${mode === 'splash' ? fontSize * 0.9 : fontSize * 0.65}px`,
-              color: '#444444',
-              letterSpacing: 2,
-              overflow: 'hidden',
-              whiteSpace: 'nowrap',
-            }}
+                fontFamily: "'Courier New', monospace",
+                fontSize: `${mode === 'splash' ? fontSize * 0.9 : fontSize * 0.65}px`,
+                color: '#888888',
+                letterSpacing: 2,
+                overflow: 'hidden',
+                whiteSpace: 'nowrap',
+              }}
           >
             {isLoading ? '⠿ QUERYING...' : '⠿ ASK A QUESTION'}
           </div>
@@ -167,7 +167,7 @@ export function SplashPanel({
             placeholder={mode === 'splash' ? 'Ask about your documents...' : 'New question...'}
             style={{
               background: '#0a0a0a',
-              border: `1px solid ${mode === 'splash' ? '#444444' : '#2a2a2a'}`,
+              border: `1px solid ${mode === 'splash' ? '#444444' : '#3a3a3a'}`,
               color: isLoading ? '#444444' : '#ffffff',
               fontFamily: "'Courier New', monospace",
               fontSize: `${mode === 'splash' ? fontSize : fontSize * 0.85}px`,
@@ -179,12 +179,12 @@ export function SplashPanel({
           />
           <div
             style={{
-              fontFamily: "'Courier New', monospace",
-              fontSize: `${fontSize * 0.65}px`,
-              color: '#2a2a2a',
-              overflow: 'hidden',
-              whiteSpace: 'nowrap',
-            }}
+                fontFamily: "'Courier New', monospace",
+                fontSize: `${fontSize * 0.65}px`,
+                color: '#555555',
+                overflow: 'hidden',
+                whiteSpace: 'nowrap',
+              }}
           >
             {mode === 'splash' ? 'ENTER to ask' : 'ENTER · ESC to hide panel'}
           </div>
