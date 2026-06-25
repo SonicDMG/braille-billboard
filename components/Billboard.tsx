@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
-import { DotMatrixDisplay } from './DotMatrixDisplay'
+import { DotMatrixDisplay, type DotMatrixDisplayHandle } from './DotMatrixDisplay'
 import { Header } from './Header'
 import { Footer } from './Footer'
 import { SplashPanel } from './SplashPanel'
@@ -35,6 +35,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const fontSize = billboardConfig.fontSize
 
   // Right panel container ref — for cols used by footer progress bar
+  const dotMatrixRef = useRef<DotMatrixDisplayHandle>(null)
   const rightPanelRef = useRef<HTMLDivElement>(null)
   const { cols } = useBrailleResize(fontSize, 2, 2, rightPanelRef as React.RefObject<HTMLElement | null>)
 
@@ -226,6 +227,11 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
               onDelete={handleDeleteItem}
               onUploadSprite={handleUploadSprite}
               onRemoveSprite={handleRemoveSprite}
+              onDownloadGif={(id) => {
+                const item = items.find(it => it.id === id)
+                const slug = item?.query.slice(0, 40).replace(/[^a-z0-9]+/gi, '-').toLowerCase() ?? 'billboard'
+                dotMatrixRef.current?.captureGif(`${slug}.gif`)
+              }}
               fontSize={fontSize}
             />
           }
@@ -280,6 +286,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
 
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <DotMatrixDisplay
+            ref={dotMatrixRef}
             segments={dotSegments}
             text={dotText}
             loading={isLoadingPhase}

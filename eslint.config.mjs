@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Third-party vendored files
+    "public/gif.worker.js",
   ]),
 ]);
 

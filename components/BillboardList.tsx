@@ -10,10 +10,11 @@ interface BillboardListProps {
   onDelete: (id: string) => void
   onUploadSprite: (id: string, file: File) => void
   onRemoveSprite: (id: string) => void
+  onDownloadGif: (id: string) => void
   fontSize: number
 }
 
-export function BillboardList({ items, activeIndex, onSelect, onDelete, onUploadSprite, onRemoveSprite, fontSize }: BillboardListProps) {
+export function BillboardList({ items, activeIndex, onSelect, onDelete, onUploadSprite, onRemoveSprite, onDownloadGif, fontSize }: BillboardListProps) {
   if (items.length === 0) return null
 
   const sm = fontSize * 0.65
@@ -174,6 +175,28 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
                     ⊘
                   </button>
                 )}
+
+                {/* Download GIF button */}
+                <button
+                  onClick={e => { e.stopPropagation(); onDownloadGif(item.id) }}
+                  title="Download as animated GIF"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#555555',
+                    fontFamily: "'Courier New', monospace",
+                    fontSize: `${xs}px`,
+                    cursor: 'pointer',
+                    padding: '0 2px',
+                    flexShrink: 0,
+                    lineHeight: 1,
+                    transition: 'color 0.15s',
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#4488cc' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
+                >
+                  ⇩
+                </button>
               </>
             )}
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useLayoutEffect, useCallback } from 'react'
+import { useEffect, useRef, useState, useLayoutEffect, useCallback, useImperativeHandle, forwardRef } from 'react'
 import type {
   BillboardSegment,
   BillboardSegmentSprite,
@@ -644,7 +644,20 @@ interface DotMatrixDisplayProps {
   imageSeg?: BillboardSegmentSprite | BillboardSegmentPortrait
 }
 
-export function DotMatrixDisplay({ segments, text = '', loading = false, streamEnergy = 0, entranceStyle = 'dissolve', segmentDelaysMs, imageSeg }: DotMatrixDisplayProps) {
+/** Imperative handle exposed via ref for GIF capture. */
+export interface DotMatrixDisplayHandle {
+  /**
+   * Capture the entrance animation as an animated GIF and trigger a download.
+   * Re-triggers the entrance animation from scratch, records every frame at
+   * ~30 fps, then encodes and downloads the result.
+   *
+   * @param filename  Suggested download filename (default: "billboard.gif")
+   */
+  captureGif(filename?: string): void
+}
+
+export const DotMatrixDisplay = forwardRef<DotMatrixDisplayHandle, DotMatrixDisplayProps>(
+function DotMatrixDisplay({ segments, text = '', loading = false, streamEnergy = 0, entranceStyle = 'dissolve', segmentDelaysMs, imageSeg }: DotMatrixDisplayProps, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
@@ -1109,6 +1122,163 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
     }
   }, [loading])
 
+  // ── GIF capture ───────────────────────────────────────────────────────────
+  // Stable refs so captureGif can read the latest values without being listed
+  // as effect deps.
+  const segmentsRef = useRef(segments)
+  const textRef = useRef(text)
+  const entranceStyleRefCapture = useRef(entranceStyle)
+  const imageSegRef = useRef(imageSeg)
+  segmentsRef.current = segments
+  textRef.current = text
+  entranceStyleRefCapture.current = entranceStyle
+  imageSegRef.current = imageSeg
+
+  useImperativeHandle(ref, () => ({
+    captureGif(filename = 'billboard.gif') {
+      const canvas = canvasRef.current
+      const d = dimsRef.current
+      if (!canvas || !d) return
+
+      // Dynamically import gif.js (keeps the bundle lean; only loaded when needed)
+      import('gif.js').then(({ default: GIF }) => {
+        const gif = new GIF({
+          workers: 2,
+          quality: 8,
+          width: d.w,
+          height: d.h,
+          workerScript: '/gif.worker.js',
+          background: '#000000',
+        })
+
+        const effectiveSegments: BillboardSegmentText[] =
+          segmentsRef.current && segmentsRef.current.length > 0
+            ? segmentsRef.current
+            : textRef.current
+              ? [{ text: textRef.current, color: { type: 'solid', hex: '#ff6600' } }]
+              : []
+
+        if (effectiveSegments.length === 0 && !imageSegRef.current) return
+
+        const style = entranceStyleRefCapture.current
+        const imgSeg = imageSegRef.current
+
+        const DOT_PX = computeDotPx(d.w, d.h, effectiveSegments, imgSeg ?? undefined)
+        const STEP = DOT_PX + GAP_PX
+        const cols = Math.floor((d.w + GAP_PX) / STEP)
+        const rows = Math.floor((d.h + GAP_PX) / STEP)
+        if (cols <= 0 || rows <= 0) return
+
+        const litMap = buildLitMap(effectiveSegments, cols, rows, imgSeg ?? undefined)
+        const litKeys = new Set(litMap.keys())
+
+        // Scratch canvas for off-screen frame rendering
+        const scratch = document.createElement('canvas')
+        scratch.width = d.w
+        scratch.height = d.h
+        const ctx = scratch.getContext('2d')!
+
+        // Entrance animation state (isolated — does not touch the live display)
+        const alphaMap: AlphaMap = new Map()
+        for (const key of litKeys) alphaMap.set(key, 0)
+
+        const bounds = buildSegmentBounds(effectiveSegments, cols, rows, !!imgSeg)
+
+        // We'll run through the animation synchronously frame-by-frame.
+        // Each "tick" corresponds to 30 ms in real time.
+        const FRAME_DELAY = 30  // ms per frame in the GIF
+
+        function renderFrame(alphaSnapshot: AlphaMap) {
+          ctx.clearRect(0, 0, d!.w, d!.h)
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              const cx = c * STEP + DOT_PX / 2
+              const cy = r * STEP + DOT_PX / 2
+              const litDot = litMap.get(`${r},${c}`)
+              ctx.beginPath()
+              ctx.arc(cx, cy, DOT_PX / 2, 0, Math.PI * 2)
+              if (litDot) {
+                const entranceAlpha = alphaSnapshot.get(`${r},${c}`) ?? 1
+                if (entranceAlpha <= 0) {
+                  ctx.fillStyle = DOT_DIM
+                } else {
+                  const rgb = resolveColor(litDot.color, c, cols, litDot.segMinCol, litDot.segMaxCol)
+                  ctx.fillStyle = entranceAlpha >= 1
+                    ? rgbToCss(rgb)
+                    : rgbToGlowCss(rgb, entranceAlpha)
+                }
+              } else {
+                ctx.fillStyle = DOT_DIM
+              }
+              ctx.fill()
+            }
+          }
+          gif.addFrame(ctx, { copy: true, delay: FRAME_DELAY })
+        }
+
+        // Simulate the entrance sequence segment-by-segment
+        if (bounds.length === 0) {
+          // No text — just one fully-lit frame
+          for (const key of litKeys) alphaMap.set(key, 1)
+          renderFrame(alphaMap)
+        } else {
+          for (let si = 0; si < bounds.length; si++) {
+            const bound = bounds[si]!
+            const gen = makeEntranceGenerator(style, { cols, rows, litKeys, bounds: bound })
+            let done = false
+            while (!done) {
+              const result = gen.next()
+              if (result.done) break
+              const frame = result.value
+              for (const [key, a] of frame) alphaMap.set(key, a)
+              renderFrame(alphaMap)
+
+              // Check ≥70% settled to advance (mirrors live animation logic)
+              let total = 0
+              let settled = 0
+              for (const key of litKeys) {
+                const r = parseInt(key.split(',')[0]!, 10)
+                if (r >= bound.minRow && r <= bound.maxRow) {
+                  total++
+                  if ((alphaMap.get(key) ?? 1) >= 0.99) settled++
+                }
+              }
+              if (total > 0 && settled / total >= 0.7) {
+                // Snap segment to fully lit and stop
+                for (const key of litKeys) {
+                  const r = parseInt(key.split(',')[0]!, 10)
+                  if (r >= bound.minRow && r <= bound.maxRow) alphaMap.set(key, 1)
+                }
+                done = true
+              }
+            }
+          }
+          // Snap any remaining dots to fully lit, render the complete final frame,
+          // then hold it for ~1 second before the GIF loops.
+          for (const key of litKeys) alphaMap.set(key, 1)
+          renderFrame(alphaMap)  // draws the fully-lit state onto ctx
+          // Hold on the final frame (addFrame reuses the already-rendered ctx)
+          for (let i = 0; i < 32; i++) {
+            gif.addFrame(ctx, { copy: true, delay: FRAME_DELAY })
+          }
+        }
+
+        gif.on('finished', (blob: Blob) => {
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = filename
+          a.click()
+          setTimeout(() => URL.revokeObjectURL(url), 60_000)
+        })
+
+        gif.render()
+      }).catch(err => {
+        console.error('[captureGif] Failed to encode GIF:', err)
+      })
+    },
+  }))
+
   return (
     <div
       ref={containerRef}
@@ -1120,4 +1290,6 @@ export function DotMatrixDisplay({ segments, text = '', loading = false, streamE
       />
     </div>
   )
-}
+})
+
+DotMatrixDisplay.displayName = 'DotMatrixDisplay'
