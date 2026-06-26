@@ -21,6 +21,34 @@ export function* spinnerFrames(): Generator<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Dots ellipsis
+// ---------------------------------------------------------------------------
+
+// Each frame is three braille chars representing one sliding dot across the
+// bottom row of a 3-cell group, mimicking animated "...".
+// Dot layout per cell: left-bottom = dot7 (⡀), right-bottom = dot8 (⢀),
+// both = dots7+8 (⣀), neither = blank (⠀).
+const DOTS_FRAMES = [
+  '⡀⠀⠀',
+  '⣀⠀⠀',
+  '⢀⡀⠀',
+  '⠀⣀⠀',
+  '⠀⢀⡀',
+  '⠀⠀⣀',
+  '⠀⠀⢀',
+  '⠀⠀⠀',
+]
+
+/** Three-character bottom-row dot bounce, mimicking "...". Tick at ~120ms. */
+export function* dotsFrames(): Generator<string> {
+  let i = 0
+  while (true) {
+    yield DOTS_FRAMES[i % DOTS_FRAMES.length]!
+    i++
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Idle ambient wave
 // ---------------------------------------------------------------------------
 

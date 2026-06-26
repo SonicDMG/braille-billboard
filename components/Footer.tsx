@@ -1,9 +1,11 @@
 'use client'
 
-import { dwellProgressBar } from '@/lib/braille-animations'
+import { useEffect, useState } from 'react'
+import { dwellProgressBar, dotsFrames } from '@/lib/braille-animations'
 
 interface FooterProps {
   summary: string
+  isLoading?: boolean
   dwellRemaining: number
   dwellTotal: number
   cols: number
@@ -11,9 +13,20 @@ interface FooterProps {
   onAsk?: () => void
 }
 
-export function Footer({ summary, dwellRemaining, dwellTotal, cols, fontSize, onAsk }: FooterProps) {
+export function Footer({ summary, isLoading, dwellRemaining, dwellTotal, cols, fontSize, onAsk }: FooterProps) {
   const progress = dwellTotal > 0 ? 1 - dwellRemaining / dwellTotal : 0
   const bar = dwellProgressBar(progress, cols)
+
+  const [spinnerFrame, setSpinnerFrame] = useState('⠀⠀⠀')
+
+  useEffect(() => {
+    if (!isLoading) return
+    const gen = dotsFrames()
+    const id = setInterval(() => {
+      setSpinnerFrame(gen.next().value as string)
+    }, 120)
+    return () => clearInterval(id)
+  }, [isLoading])
 
   return (
     <div style={{ fontFamily: "'Courier New', monospace", fontSize: `${fontSize}px`, color: '#aaaaaa' }}>
@@ -35,7 +48,9 @@ export function Footer({ summary, dwellRemaining, dwellTotal, cols, fontSize, on
             textOverflow: 'ellipsis',
           }}
         >
-          {summary}
+          {isLoading
+            ? <>{summary.replace(/\.{3}$/, '')}<span style={{ position: 'relative', top: -5 }}>{spinnerFrame}</span></>
+            : summary}
         </div>
         {onAsk && (
           <button

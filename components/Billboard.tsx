@@ -298,6 +298,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
 
         <Footer
           summary={summary}
+          isLoading={isLoadingPhase}
           dwellRemaining={dwellRemaining}
           dwellTotal={dwellTotal}
           cols={cols}
