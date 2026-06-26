@@ -43,6 +43,7 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
 
   return (
     <div
+      className="billboard-scroll"
       style={{
         display: 'flex',
         flexDirection: 'column',
