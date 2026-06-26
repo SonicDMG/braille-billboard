@@ -1,9 +1,23 @@
 import { NextRequest } from 'next/server'
-import { streamForVisualization } from '@/lib/openrag'
+import { streamForVisualization, resolveFilterMention, type ResolvedFilter } from '@/lib/openrag'
 import { parseVisualizationData } from '@/lib/parse-viz'
 import { generatePortraitSprite } from '@/lib/everart'
 
 export const runtime = 'nodejs'
+
+/**
+ * Parse a single @mention token from a query string.
+ * Returns `{ mention, cleanQuery }` where `mention` is the matched name (without @)
+ * and `cleanQuery` is the query with the @mention stripped and whitespace normalised.
+ * Returns `{ mention: null, cleanQuery: query }` when no @mention is present.
+ */
+function parseAtMention(query: string): { mention: string | null; cleanQuery: string } {
+  const match = query.match(/@([\w-]+)/)
+  if (!match) return { mention: null, cleanQuery: query }
+  const mention = match[1]!
+  const cleanQuery = query.replace(/@[\w-]+/, '').replace(/\s{2,}/g, ' ').trim()
+  return { mention, cleanQuery }
+}
 
 /**
  * POST /api/query
@@ -15,16 +29,28 @@ export const runtime = 'nodejs'
  */
 export async function POST(req: NextRequest) {
   const body = await req.json() as { query?: unknown }
-  const query = typeof body.query === 'string' ? body.query.trim() : ''
+  const rawQuery = typeof body.query === 'string' ? body.query.trim() : ''
 
-  if (!query) {
+  if (!rawQuery) {
     return new Response(
       JSON.stringify({ type: 'error', message: 'query is required' }) + '\n',
       { status: 400, headers: { 'Content-Type': 'application/x-ndjson' } },
     )
   }
 
-  console.log('[/api/query] streaming query:', query)
+  // Resolve an optional @filter-name mention before streaming.
+  const { mention, cleanQuery: query } = parseAtMention(rawQuery)
+  let filter: ResolvedFilter | undefined
+  if (mention) {
+    const resolved = await resolveFilterMention(mention)
+    if (resolved) {
+      filter = resolved
+    } else {
+      console.warn(`[/api/query] @${mention} did not match any knowledge filter — ignoring`)
+    }
+  }
+
+  console.log('[/api/query] streaming query:', query, filter ? `filter:${filter.filterId}` : '')
 
   const encoder = new TextEncoder()
 
@@ -52,7 +78,7 @@ export async function POST(req: NextRequest) {
       let chatId: string | null = null
       try {
         // Await the connection; then drain events — mirrors killrctx pattern.
-        const events = await streamForVisualization(query)
+        const events = await streamForVisualization(query, filter)
 
         for await (const event of events) {
           if (closed) break

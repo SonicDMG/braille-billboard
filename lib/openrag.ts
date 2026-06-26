@@ -1,5 +1,5 @@
 import { OpenRAGClient } from 'openrag-sdk'
-import type { StreamEvent } from 'openrag-sdk'
+import type { StreamEvent, SearchFilters } from 'openrag-sdk'
 
 let _client: OpenRAGClient | null = null
 
@@ -124,11 +124,89 @@ Rules:
  * Pattern mirrors killrctx: await the connection setup, then the caller
  * drains events with `for await`. The SDK's ChatStream handles cleanup.
  */
-export async function streamForVisualization(query: string): Promise<AsyncIterable<StreamEvent>> {
+/** A minimal filter shape safe to serialize to the client. */
+export interface FilterSummary {
+  id: string
+  name: string
+  description?: string
+}
+
+/**
+ * List all knowledge filters (up to 100).
+ * Returns minimal shape — id + name + description — safe to send to the browser.
+ */
+export async function listFilters(): Promise<FilterSummary[]> {
+  const client = getClient()
+  const filters = await client.knowledgeFilters.search(undefined, 100)
+  return filters.map(f => ({ id: f.id, name: f.name, description: f.description }))
+}
+
+/** Resolved filter details needed to scope a chat request. */
+export interface ResolvedFilter {
+  filterId: string
+  filters?: SearchFilters
+  limit?: number
+  scoreThreshold?: number
+}
+
+/**
+ * Resolve a knowledge-filter name (from an @mention) to its full filter details.
+ * Returns null if no exact (case-insensitive) name match is found.
+ *
+ * We fetch the full KnowledgeFilter so we can also pass its queryData.filters,
+ * limit, and scoreThreshold directly in the chat request — this ensures the
+ * document scope is applied even if the server-side filter_id lookup doesn't
+ * propagate all constraints through the agent retrieval path.
+ */
+export async function resolveFilterMention(name: string): Promise<ResolvedFilter | null> {
+  const client = getClient()
+  const filters = await client.knowledgeFilters.search(name)
+  const match = filters.find(f => f.name.toLowerCase() === name.toLowerCase())
+  if (!match) return null
+
+  // Fetch the full filter to get queryData constraints
+  const full = await client.knowledgeFilters.get(match.id)
+  if (!full) return null
+
+  const resolved: ResolvedFilter = { filterId: full.id }
+
+  // Only pass data_sources — never document_types, owners, connector_types.
+  // killrctx confirmed this: sending those extra fields (even as ['*'])
+  // causes OpenRAG to return 0 results. data_sources is the only constraint
+  // that scopes retrieval correctly.
+  const qf = full.queryData.filters as Record<string, unknown> | undefined
+  const rawSources = qf?.['data_sources']
+  if (Array.isArray(rawSources)) {
+    const sources = rawSources.filter((v): v is string => typeof v === 'string' && v !== '*')
+    if (sources.length > 0) resolved.filters = { data_sources: sources }
+  }
+
+  if (full.queryData.limit) resolved.limit = full.queryData.limit
+  if (full.queryData.scoreThreshold) resolved.scoreThreshold = full.queryData.scoreThreshold
+
+  console.log(`[openrag] resolved filter "${name}" →`, JSON.stringify({
+    filterId: resolved.filterId,
+    filters: resolved.filters,
+    limit: resolved.limit,
+    scoreThreshold: resolved.scoreThreshold,
+  }, null, 2))
+  return resolved
+}
+
+export async function streamForVisualization(query: string, filter?: ResolvedFilter): Promise<AsyncIterable<StreamEvent>> {
   const client = getClient()
   const message = buildVisualizationMessage(query)
-  console.log('[openrag] → streaming query:', query)
-  const stream = await client.chat.stream({ message })
+  const params = {
+    message,
+    ...(filter ? {
+      filterId: filter.filterId,
+      ...(filter.filters ? { filters: filter.filters } : {}),
+      limit: filter.limit ?? 8,
+      ...(filter.scoreThreshold != null ? { scoreThreshold: filter.scoreThreshold } : {}),
+    } : {}),
+  }
+  console.log('[openrag] chat.stream →', JSON.stringify(params, null, 2))
+  const stream = await client.chat.stream(params)
 
   async function* withDebugLog(): AsyncIterable<StreamEvent> {
     let accumulated = ''
