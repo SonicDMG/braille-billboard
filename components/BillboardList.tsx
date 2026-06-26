@@ -6,17 +6,34 @@ import type { BillboardItem } from '@/lib/types'
 interface BillboardListProps {
   items: BillboardItem[]
   activeIndex: number
+  activeGroupKey: string | null
   onSelect: (index: number) => void
   onDelete: (id: string) => void
   onUploadSprite: (id: string, file: File) => void
   onRemoveSprite: (id: string) => void
   onDownloadGif: (id: string) => void
+  onSetGroup: (key: string | null) => void
   fontSize: number
 }
 
-export function BillboardList({ items, activeIndex, onSelect, onDelete, onUploadSprite, onRemoveSprite, onDownloadGif, fontSize }: BillboardListProps) {
-  if (items.length === 0) return null
+/** Human-readable label for a filterKey. '' → 'unfiltered', 'dnd|wiki' → '@dnd @wiki' */
+function groupLabel(key: string): string {
+  if (key === '') return 'unfiltered'
+  return key.split('|').map(k => `@${k}`).join(' ')
+}
 
+export function BillboardList({
+  items,
+  activeIndex,
+  activeGroupKey,
+  onSelect,
+  onDelete,
+  onUploadSprite,
+  onRemoveSprite,
+  onDownloadGif,
+  onSetGroup,
+  fontSize,
+}: BillboardListProps) {
   const sm = fontSize * 0.65
   const xs = fontSize * 0.55
 
@@ -24,6 +41,8 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
   // Hidden file input ref — one per list, reused for whichever active item triggers it
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pendingUploadIdRef = useRef<string | null>(null)
+
+  if (items.length === 0) return null
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -40,6 +59,18 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
     pendingUploadIdRef.current = id
     fileInputRef.current?.click()
   }
+
+  // Derive unique groups in order of first appearance
+  const groupKeys: string[] = []
+  for (const item of items) {
+    if (!groupKeys.includes(item.filterKey)) groupKeys.push(item.filterKey)
+  }
+  const hasMultipleGroups = groupKeys.length > 1
+
+  // Items filtered to the active group (for count display); null = all
+  const groupCount = (key: string) => items.filter(it => it.filterKey === key).length
+
+  const mono = "'Courier New', monospace"
 
   return (
     <div
@@ -62,9 +93,10 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
         onChange={handleFileChange}
       />
 
+      {/* Header row */}
       <div
         style={{
-          fontFamily: "'Courier New', monospace",
+          fontFamily: mono,
           fontSize: `${xs}px`,
           color: '#555555',
           letterSpacing: 2,
@@ -75,94 +107,165 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
         BILLBOARD — {items.length} ITEM{items.length !== 1 ? 'S' : ''}
       </div>
 
-      {items.map((item, idx) => {
-        const isActive = idx === activeIndex % items.length
-        const isHovered = hoveredIdx === idx
-        const hasSprite = item.spriteData != null
-        return (
-          <div
-            key={item.id}
-            onClick={() => onSelect(idx)}
-            onMouseEnter={() => setHoveredIdx(idx)}
-            onMouseLeave={() => setHoveredIdx(null)}
+      {/* Group selector — only shown when there are multiple groups */}
+      {hasMultipleGroups && (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 3,
+            paddingBottom: 6,
+            flexShrink: 0,
+          }}
+        >
+          {/* "ALL" pill */}
+          <button
+            onClick={() => onSetGroup(null)}
+            title="Cycle through all groups"
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '4px 6px',
-              border: `1px solid ${isActive ? '#4a4a4a' : '#2a2a2a'}`,
+              background: activeGroupKey === null ? '#222222' : 'transparent',
+              border: `1px solid ${activeGroupKey === null ? '#555555' : '#333333'}`,
+              color: activeGroupKey === null ? '#aaaaaa' : '#555555',
+              fontFamily: mono,
+              fontSize: `${xs}px`,
+              cursor: 'pointer',
+              padding: '2px 6px',
               borderRadius: 2,
-              background: isActive ? '#111111' : 'transparent',
-              transition: 'background 0.3s, border-color 0.3s',
-              flexShrink: 0,
-              cursor: isActive ? 'default' : 'pointer',
+              letterSpacing: 1,
+              transition: 'background 0.2s, border-color 0.2s, color 0.2s',
             }}
+            onMouseEnter={e => { if (activeGroupKey !== null) (e.currentTarget as HTMLButtonElement).style.color = '#888888' }}
+            onMouseLeave={e => { if (activeGroupKey !== null) (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
           >
-            {/* Active indicator */}
-            <span
-              style={{
-                  fontFamily: "'Courier New', monospace",
+            ALL
+          </button>
+
+          {/* One pill per group */}
+          {groupKeys.map(key => {
+            const isActive = activeGroupKey === key
+            return (
+              <button
+                key={key}
+                onClick={() => onSetGroup(key)}
+                title={`Cycle ${groupLabel(key)} group (${groupCount(key)} item${groupCount(key) !== 1 ? 's' : ''})`}
+                style={{
+                  background: isActive ? '#222222' : 'transparent',
+                  border: `1px solid ${isActive ? '#555555' : '#333333'}`,
+                  color: isActive ? '#aaaaaa' : '#555555',
+                  fontFamily: mono,
                   fontSize: `${xs}px`,
-                  color: isActive ? '#888888' : '#555555',
+                  cursor: 'pointer',
+                  padding: '2px 6px',
+                  borderRadius: 2,
+                  letterSpacing: 1,
+                  transition: 'background 0.2s, border-color 0.2s, color 0.2s',
+                }}
+                onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = '#888888' }}
+                onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
+              >
+                {groupLabel(key)}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Item rows — filtered to active group when one is selected */}
+      {(() => {
+        const rows: React.ReactNode[] = []
+        const seenKeys = new Set<string>()
+        const visibleItems = activeGroupKey !== null
+          ? items.map((item, idx) => ({ item, idx })).filter(({ item }) => item.filterKey === activeGroupKey)
+          : items.map((item, idx) => ({ item, idx }))
+
+        visibleItems.forEach(({ item, idx }) => {
+          // Insert a group label the first time each key is seen (only when multiple groups)
+          if (hasMultipleGroups && !seenKeys.has(item.filterKey)) {
+            seenKeys.add(item.filterKey)
+            const isGroupActive = activeGroupKey === item.filterKey
+            rows.push(
+              <div
+                key={`group-${item.filterKey}`}
+                style={{
+                  fontFamily: mono,
+                  fontSize: `${xs * 0.9}px`,
+                  color: isGroupActive ? '#666666' : '#3a3a3a',
+                  letterSpacing: 1,
+                  paddingTop: rows.length > 0 ? 4 : 0,
+                  paddingBottom: 1,
                   flexShrink: 0,
-                  transition: 'color 0.3s',
+                  transition: 'color 0.2s',
                 }}
-            >
-              {isActive ? '⠿' : '·'}
-            </span>
+              >
+                {groupLabel(item.filterKey).toUpperCase()}
+              </div>
+            )
+          }
 
-            {/* Query label */}
-            <span
+          const isActive = idx === activeIndex % items.length
+          const isHovered = hoveredIdx === idx
+          const hasSprite = item.spriteData != null
+          rows.push(
+            <div
+              key={item.id}
+              onClick={() => onSelect(idx)}
+              onMouseEnter={() => setHoveredIdx(idx)}
+              onMouseLeave={() => setHoveredIdx(null)}
               style={{
-                  fontFamily: "'Courier New', monospace",
-                  fontSize: `${sm}px`,
-                  color: isActive ? '#cccccc' : isHovered ? '#999999' : '#777777',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  flex: 1,
-                  transition: 'color 0.3s',
-                }}
-              title={item.query}
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 6px',
+                border: `1px solid ${isActive ? '#4a4a4a' : '#2a2a2a'}`,
+                borderRadius: 2,
+                background: isActive ? '#111111' : 'transparent',
+                transition: 'background 0.3s, border-color 0.3s',
+                flexShrink: 0,
+                cursor: isActive ? 'default' : 'pointer',
+              }}
             >
-              {item.query}
-            </span>
-
-            {/* Upload / remove sprite — active item only */}
-            {isActive && (
-              <>
-                {/* Upload button — shows ⊕ normally, ⊙ when a sprite is already attached */}
-                <button
-                  onClick={e => { e.stopPropagation(); triggerUpload(item.id) }}
-                  title={hasSprite ? 'Replace logo image' : 'Upload logo image'}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: hasSprite ? '#aa8833' : '#555555',
-                    fontFamily: "'Courier New', monospace",
+              {/* Active indicator */}
+              <span
+                style={{
+                    fontFamily: mono,
                     fontSize: `${xs}px`,
-                    cursor: 'pointer',
-                    padding: '0 2px',
+                    color: isActive ? '#888888' : '#555555',
                     flexShrink: 0,
-                    lineHeight: 1,
-                    transition: 'color 0.15s',
+                    transition: 'color 0.3s',
                   }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc9933' }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = hasSprite ? '#aa8833' : '#555555' }}
-                >
-                  {hasSprite ? '⊙' : '⊕'}
-                </button>
+              >
+                {isActive ? '⠿' : '·'}
+              </span>
 
-                {/* Remove sprite button — only when a sprite is attached */}
-                {hasSprite && (
+              {/* Query label */}
+              <span
+                style={{
+                    fontFamily: mono,
+                    fontSize: `${sm}px`,
+                    color: isActive ? '#cccccc' : isHovered ? '#999999' : '#777777',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    flex: 1,
+                    transition: 'color 0.3s',
+                  }}
+                title={item.query}
+              >
+                {item.query}
+              </span>
+
+              {/* Upload / remove sprite — active item only */}
+              {isActive && (
+                <>
+                  {/* Upload button — shows ⊕ normally, ⊙ when a sprite is already attached */}
                   <button
-                    onClick={e => { e.stopPropagation(); onRemoveSprite(item.id) }}
-                    title="Remove logo image"
+                    onClick={e => { e.stopPropagation(); triggerUpload(item.id) }}
+                    title={hasSprite ? 'Replace logo image' : 'Upload logo image'}
                     style={{
                       background: 'none',
                       border: 'none',
-                      color: '#555555',
-                      fontFamily: "'Courier New', monospace",
+                      color: hasSprite ? '#aa8833' : '#555555',
+                      fontFamily: mono,
                       fontSize: `${xs}px`,
                       cursor: 'pointer',
                       padding: '0 2px',
@@ -170,61 +273,87 @@ export function BillboardList({ items, activeIndex, onSelect, onDelete, onUpload
                       lineHeight: 1,
                       transition: 'color 0.15s',
                     }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc6644' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc9933' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = hasSprite ? '#aa8833' : '#555555' }}
+                  >
+                    {hasSprite ? '⊙' : '⊕'}
+                  </button>
+
+                  {/* Remove sprite button — only when a sprite is attached */}
+                  {hasSprite && (
+                    <button
+                      onClick={e => { e.stopPropagation(); onRemoveSprite(item.id) }}
+                      title="Remove logo image"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#555555',
+                        fontFamily: mono,
+                        fontSize: `${xs}px`,
+                        cursor: 'pointer',
+                        padding: '0 2px',
+                        flexShrink: 0,
+                        lineHeight: 1,
+                        transition: 'color 0.15s',
+                      }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc6644' }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
+                    >
+                      ⊘
+                    </button>
+                  )}
+
+                  {/* Download GIF button */}
+                  <button
+                    onClick={e => { e.stopPropagation(); onDownloadGif(item.id) }}
+                    title="Download as animated GIF"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#555555',
+                      fontFamily: mono,
+                      fontSize: `${xs}px`,
+                      cursor: 'pointer',
+                      padding: '0 2px',
+                      flexShrink: 0,
+                      lineHeight: 1,
+                      transition: 'color 0.15s',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#4488cc' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
                   >
-                    ⊘
+                    ⇩
                   </button>
-                )}
+                </>
+              )}
 
-                {/* Download GIF button */}
-                <button
-                  onClick={e => { e.stopPropagation(); onDownloadGif(item.id) }}
-                  title="Download as animated GIF"
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#555555',
-                    fontFamily: "'Courier New', monospace",
-                    fontSize: `${xs}px`,
-                    cursor: 'pointer',
-                    padding: '0 2px',
-                    flexShrink: 0,
-                    lineHeight: 1,
-                    transition: 'color 0.15s',
-                  }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#4488cc' }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
-                >
-                  ⇩
-                </button>
-              </>
-            )}
+              {/* Delete button */}
+              <button
+                onClick={e => { e.stopPropagation(); onDelete(item.id) }}
+                title={`Remove "${item.query}"`}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#555555',
+                  fontFamily: mono,
+                  fontSize: `${xs}px`,
+                  cursor: 'pointer',
+                  padding: '0 2px',
+                  flexShrink: 0,
+                  lineHeight: 1,
+                  transition: 'color 0.15s',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc4444' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
+              >
+                ✕
+              </button>
+            </div>
+          )
+        })
 
-            {/* Delete button */}
-            <button
-              onClick={e => { e.stopPropagation(); onDelete(item.id) }}
-              title={`Remove "${item.query}"`}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#555555',
-                fontFamily: "'Courier New', monospace",
-                fontSize: `${xs}px`,
-                cursor: 'pointer',
-                padding: '0 2px',
-                flexShrink: 0,
-                lineHeight: 1,
-                transition: 'color 0.15s',
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc4444' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
-            >
-              ✕
-            </button>
-          </div>
-        )
-      })}
+        return rows
+      })()}
     </div>
   )
 }

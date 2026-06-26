@@ -42,7 +42,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   // Layout state machine
   const [layout, setLayout] = useState<Layout>('splash')
 
-  const { phase, activeIndex, items, submitManualQuery, addItem, deleteItem, jumpTo, lastManualChatIdRef, setItemSprite, removeItemSprite } = useCycle({
+  const { phase, activeIndex, items, activeGroupKey, submitManualQuery, addItem, deleteItem, jumpTo, setActiveGroup, lastManualChatIdRef, setItemSprite, removeItemSprite } = useCycle({
     dwellSeconds: billboardConfig.dwellSeconds,
     resumeAfterManualSeconds: billboardConfig.resumeAfterManualSeconds,
   })
@@ -223,6 +223,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
             <BillboardList
               items={items}
               activeIndex={activeIndex}
+              activeGroupKey={activeGroupKey}
               onSelect={jumpTo}
               onDelete={handleDeleteItem}
               onUploadSprite={handleUploadSprite}
@@ -232,6 +233,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
                 const slug = item?.query.slice(0, 40).replace(/[^a-z0-9]+/gi, '-').toLowerCase() ?? 'billboard'
                 dotMatrixRef.current?.captureGif(`${slug}.gif`)
               }}
+              onSetGroup={setActiveGroup}
               fontSize={fontSize}
             />
           }

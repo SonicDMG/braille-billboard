@@ -20,6 +20,7 @@ import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { VisualizationData, SpriteData } from "./types";
+import { extractFilterKey } from "./filter-key";
 
 // ---------------------------------------------------------------------------
 // Row type — mirrors the BillboardItem shape, stored flat in SQLite.
@@ -33,6 +34,7 @@ export type ItemRow = {
   data_json: string;         // JSON-serialised VisualizationData
   audio_b64: string | null;
   sprite_data: string | null; // JSON-serialised SpriteData, or NULL
+  filter_key: string | null;  // @mention group key, or NULL for unfiltered
   created_at: number;        // ms since epoch
 };
 
@@ -44,6 +46,7 @@ export type PersistedItem = {
   data: VisualizationData;
   audioB64: string | null;
   spriteData: SpriteData | null;
+  filterKey: string;
   createdAt: number;
 };
 
@@ -73,12 +76,30 @@ function getDb(): Database.Database {
     );
   `);
 
-  // Idempotent migration: add sprite_data column if it doesn't exist yet.
+  // Idempotent migrations: add columns introduced after the initial schema.
   const cols = conn
     .prepare("PRAGMA table_info(items)")
     .all() as { name: string }[];
   if (!cols.some((c) => c.name === "sprite_data")) {
     conn.exec("ALTER TABLE items ADD COLUMN sprite_data TEXT");
+  }
+  if (!cols.some((c) => c.name === "filter_key")) {
+    conn.exec("ALTER TABLE items ADD COLUMN filter_key TEXT");
+  }
+  // Backfill any rows where filter_key is still NULL — covers both the initial
+  // migration and rows inserted before the backfill ran (e.g. column existed
+  // but app hadn't restarted yet).
+  const nullRows = conn
+    .prepare("SELECT id, query FROM items WHERE filter_key IS NULL")
+    .all() as { id: string; query: string }[];
+  if (nullRows.length > 0) {
+    const update = conn.prepare("UPDATE items SET filter_key = ? WHERE id = ?");
+    const backfill = conn.transaction(() => {
+      for (const row of nullRows) {
+        update.run(extractFilterKey(row.query) || null, row.id);
+      }
+    });
+    backfill();
   }
 
   _db = conn;
@@ -97,6 +118,7 @@ function rowToItem(row: ItemRow): PersistedItem {
     data: JSON.parse(row.data_json) as VisualizationData,
     audioB64: row.audio_b64,
     spriteData: row.sprite_data ? (JSON.parse(row.sprite_data) as SpriteData) : null,
+    filterKey: row.filter_key ?? '',
     createdAt: row.created_at,
   };
 }
@@ -120,11 +142,12 @@ export function insertItem(item: {
   chatId: string | null;
   data: VisualizationData;
   audioB64: string | null;
+  filterKey: string;
 }): void {
   getDb()
     .prepare(
-      `INSERT OR IGNORE INTO items (id, query, chat_id, data_json, audio_b64, sprite_data, created_at)
-       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+      `INSERT OR IGNORE INTO items (id, query, chat_id, data_json, audio_b64, sprite_data, filter_key, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
     )
     .run(
       item.id,
@@ -132,6 +155,7 @@ export function insertItem(item: {
       item.chatId,
       JSON.stringify(item.data),
       item.audioB64,
+      item.filterKey || null,
       Date.now(),
     );
 }

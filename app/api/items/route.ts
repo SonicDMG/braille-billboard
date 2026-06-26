@@ -29,9 +29,10 @@ export async function POST(req: NextRequest) {
     chatId?: unknown
     data?: unknown
     audioB64?: unknown
+    filterKey?: unknown
   }
 
-  const { id, query, chatId, data, audioB64 } = body
+  const { id, query, chatId, data, audioB64, filterKey } = body
 
   if (typeof id !== 'string' || typeof query !== 'string' || !data) {
     return Response.json({ error: 'id, query, and data are required' }, { status: 400 })
@@ -43,6 +44,7 @@ export async function POST(req: NextRequest) {
     chatId: typeof chatId === 'string' ? chatId : null,
     data: data as VisualizationData,
     audioB64: typeof audioB64 === 'string' ? audioB64 : null,
+    filterKey: typeof filterKey === 'string' ? filterKey : '',
   })
 
   return Response.json({ ok: true }, { status: 201 })

@@ -147,6 +147,12 @@ export interface BillboardItem {
    * null when no logo has been uploaded for this item.
    */
   spriteData: SpriteData | null
+  /**
+   * Stable group key derived from the @mention filter names used in the query.
+   * Sorted filter names joined with '|', or '' when no filters were used.
+   * Items with the same filterKey are grouped together in the billboard list.
+   */
+  filterKey: string
 }
 
 export type BillboardPhase =

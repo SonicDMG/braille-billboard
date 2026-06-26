@@ -3,6 +3,7 @@
 import { useReducer, useEffect, useRef, useCallback } from 'react'
 import type { BillboardPhase, BillboardItem, VisualizationData, SpriteData } from '@/lib/types'
 import { imageToSprite, spriteMapToData } from '@/lib/image-to-sprite'
+import { extractFilterKey } from '@/lib/filter-key'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State & actions
@@ -15,6 +16,11 @@ interface CycleState {
   items: BillboardItem[]
   dwellSeconds: number
   resumeAfterManualSeconds: number
+  /**
+   * When non-null, only items whose filterKey === activeGroupKey participate
+   * in auto-cycling. null means "all items".
+   */
+  activeGroupKey: string | null
 }
 
 type CycleAction =
@@ -34,6 +40,58 @@ type CycleAction =
   | { type: 'ITEM_DELETED'; id: string }
   | { type: 'JUMP_TO'; index: number }
   | { type: 'ITEM_SPRITE_SET'; id: string; spriteData: SpriteData | null }
+  | { type: 'SET_GROUP'; key: string | null }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Group-aware helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the subset indices of items that belong to the active group.
+ * When groupKey is null, all indices are included.
+ */
+function groupIndices(items: BillboardItem[], groupKey: string | null): number[] {
+  if (groupKey === null) return items.map((_, i) => i)
+  return items.reduce<number[]>((acc, item, i) => {
+    if (item.filterKey === groupKey) acc.push(i)
+    return acc
+  }, [])
+}
+
+/**
+ * Given the current activeIndex, find the next index within the active group.
+ * Returns null when the group is empty.
+ */
+function nextGroupIndex(
+  items: BillboardItem[],
+  currentIndex: number,
+  groupKey: string | null,
+): number | null {
+  const indices = groupIndices(items, groupKey)
+  if (indices.length === 0) return null
+  const pos = indices.indexOf(currentIndex)
+  if (pos === -1) {
+    // Current item not in group — jump to first in group
+    return indices[0]!
+  }
+  return indices[(pos + 1) % indices.length]!
+}
+
+/**
+ * Find the first valid index within the active group, starting from `start`.
+ * Falls back to the first item in the group when `start` is out of range.
+ */
+function firstGroupIndex(
+  items: BillboardItem[],
+  groupKey: string | null,
+): number | null {
+  const indices = groupIndices(items, groupKey)
+  return indices.length > 0 ? indices[0]! : null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reducer
+// ─────────────────────────────────────────────────────────────────────────────
 
 function reducer(state: CycleState, action: CycleAction): CycleState {
   const { phase } = state
@@ -42,7 +100,10 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
     case 'START_NEXT': {
       if (phase.phase !== 'idle') return state
       if (state.items.length === 0) return state
-      const idx = state.activeIndex % state.items.length
+      const indices = groupIndices(state.items, state.activeGroupKey)
+      if (indices.length === 0) return state
+      // Use activeIndex if it's in the group; otherwise start from the first group item.
+      const idx = indices.includes(state.activeIndex) ? state.activeIndex : indices[0]!
       return {
         ...state,
         activeIndex: idx,
@@ -101,14 +162,14 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
     }
 
     case 'DWELL_DONE': {
-      if (state.items.length === 0) return { ...state, phase: { phase: 'idle' } }
-      const nextIndex = (state.activeIndex + 1) % state.items.length
+      const nextIdx = nextGroupIndex(state.items, state.activeIndex, state.activeGroupKey)
+      if (nextIdx === null) return { ...state, phase: { phase: 'idle' } }
       return {
         ...state,
-        activeIndex: nextIndex,
+        activeIndex: nextIdx,
         phase: {
           phase: 'loading',
-          query: state.items[nextIndex]!.query,
+          query: state.items[nextIdx]!.query,
           tokenCount: 0,
           streamText: '',
         },
@@ -138,16 +199,16 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       }
 
     case 'RESUME_AUTO': {
-      if (state.items.length === 0) {
+      const nextIdx = nextGroupIndex(state.items, state.activeIndex, state.activeGroupKey)
+      if (nextIdx === null) {
         return { ...state, phase: { phase: 'idle' } }
       }
-      const nextIndex = (state.activeIndex + 1) % state.items.length
       return {
         ...state,
-        activeIndex: nextIndex,
+        activeIndex: nextIdx,
         phase: {
           phase: 'loading',
-          query: state.items[nextIndex]!.query,
+          query: state.items[nextIdx]!.query,
           tokenCount: 0,
           streamText: '',
         },
@@ -198,6 +259,33 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       return { ...state, items }
     }
 
+    case 'SET_GROUP': {
+      // Switching group — find the first item in the new group (or keep current if in group).
+      const key = action.key
+      const firstIdx = firstGroupIndex(state.items, key)
+      const newActiveIndex = firstIdx ?? state.activeIndex
+      // If the billboard was displaying or idle, kick off a load for the new group item.
+      const shouldLoad = phase.phase === 'displaying' || phase.phase === 'idle' || phase.phase === 'error'
+      if (shouldLoad && firstIdx !== null) {
+        return {
+          ...state,
+          activeGroupKey: key,
+          activeIndex: newActiveIndex,
+          phase: {
+            phase: 'loading',
+            query: state.items[newActiveIndex]!.query,
+            tokenCount: 0,
+            streamText: '',
+          },
+        }
+      }
+      return {
+        ...state,
+        activeGroupKey: key,
+        activeIndex: newActiveIndex,
+      }
+    }
+
     default:
       return state
   }
@@ -228,6 +316,7 @@ export function useCycle({
     items: [],
     dwellSeconds,
     resumeAfterManualSeconds,
+    activeGroupKey: null,
   })
 
   // Cache: prevents re-fetching the same question across cycles.
@@ -243,8 +332,12 @@ export function useCycle({
         if (!res.ok) return
         const json = await res.json() as { items: BillboardItem[] }
         if (json.items.length > 0) {
-          // Ensure spriteData is present (null for items persisted before this feature)
-          const items = json.items.map(it => ({ ...it, spriteData: it.spriteData ?? null }))
+          // Ensure spriteData and filterKey are present for items persisted before these features.
+          const items = json.items.map(it => ({
+            ...it,
+            spriteData: it.spriteData ?? null,
+            filterKey: it.filterKey ?? '',
+          }))
           for (const item of items) {
             cacheRef.current.set(item.query.trim().toLowerCase(), {
               data: item.data,
@@ -370,7 +463,6 @@ export function useCycle({
   // Transition delay
   useEffect(() => {
     if (phase.phase !== 'transitioning') return
-    const audioB64 = phase.audioB64
     const t = setTimeout(() => {
       dispatch({ type: 'TRANSITION_DONE' })
     }, 1500)
@@ -419,7 +511,8 @@ export function useCycle({
    */
   const addItem = useCallback((query: string, chatId: string | null, data: VisualizationData, audioB64: string | null) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-    const item: BillboardItem = { id, query, chatId, data, audioB64, spriteData: null }
+    const filterKey = extractFilterKey(query)
+    const item: BillboardItem = { id, query, chatId, data, audioB64, spriteData: null, filterKey }
     dispatch({ type: 'ITEM_ADDED', item })
     // If we were idle, start cycling immediately
     dispatch({ type: 'START_NEXT' })
@@ -427,7 +520,7 @@ export function useCycle({
     void fetch('/api/items', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, query, chatId, data, audioB64 }),
+      body: JSON.stringify({ id, query, chatId, data, audioB64, filterKey }),
     })
   }, [])
 
@@ -458,6 +551,13 @@ export function useCycle({
   const jumpTo = useCallback((index: number) => {
     if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
     dispatch({ type: 'JUMP_TO', index })
+  }, [])
+
+  /**
+   * Switch the active cycling group. Pass null to cycle through all items.
+   */
+  const setActiveGroup = useCallback((key: string | null) => {
+    dispatch({ type: 'SET_GROUP', key })
   }, [])
 
   /**
@@ -499,10 +599,12 @@ export function useCycle({
     phase: state.phase,
     activeIndex: state.activeIndex,
     items: state.items,
+    activeGroupKey: state.activeGroupKey,
     submitManualQuery,
     addItem,
     deleteItem,
     jumpTo,
+    setActiveGroup,
     lastManualChatIdRef,
     setItemSprite,
     removeItemSprite,
