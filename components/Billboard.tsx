@@ -55,6 +55,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   // GIF export state
   const [exportingGif, setExportingGif] = useState(false)
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null)
+  const [encodeProgress, setEncodeProgress] = useState<number | null>(null)
 
   // Stable entrance style for the current displaying phase.
   const fallbackEntranceRef = useRef<EntranceStyle>('dissolve')
@@ -154,38 +155,37 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
     setExportingGif(true)
     setExportProgress(null)
 
-    const gifItems = playlistItems.map(item => {
-      const activeSpriteData = item.spriteData ?? item.data.generatedSpriteData ?? null
-      const spriteMap = activeSpriteData ? spriteDataToMap(activeSpriteData) : null
-      const imageSeg: BillboardSegmentSprite | undefined = spriteMap ? { type: 'sprite', spriteMap } : undefined
-      return {
-        segments: item.data.segments,
-        text: item.data.words ?? item.data.summary,
-        entranceStyle: item.data.entranceStyle,
-        imageSeg,
-      }
-    })
-
-    dotMatrixRef.current?.capturePlaylistGif(
-      gifItems,
-      'presentation.gif',
-      (done, total) => setExportProgress({ done, total }),
-    )
-
-    // capturePlaylistGif is synchronous for frame building then async for encoding.
-    // Listen for the download to complete by polling progress completion.
-    const check = setInterval(() => {
-      setExportProgress(prev => {
-        if (prev && prev.done === prev.total) {
-          clearInterval(check)
-          setTimeout(() => {
-            setExportingGif(false)
-            setExportProgress(null)
-          }, 500)
+    // Defer the heavy work one frame so React can repaint the "ENCODING…" button
+    // state before the synchronous frame-building loop blocks the main thread.
+    setTimeout(() => {
+      const gifItems = playlistItems.map(item => {
+        const activeSpriteData = item.spriteData ?? item.data.generatedSpriteData ?? null
+        const spriteMap = activeSpriteData ? spriteDataToMap(activeSpriteData) : null
+        const imageSeg: BillboardSegmentSprite | undefined = spriteMap ? { type: 'sprite', spriteMap } : undefined
+        return {
+          segments: item.data.segments,
+          text: item.data.words ?? item.data.summary,
+          entranceStyle: item.data.entranceStyle,
+          imageSeg,
         }
-        return prev
       })
-    }, 200)
+
+      dotMatrixRef.current?.capturePlaylistGif(
+        gifItems,
+        'presentation.gif',
+        (done, total) => setExportProgress({ done, total }),
+        (fraction) => {
+          setEncodeProgress(fraction)
+          if (fraction >= 1) {
+            setTimeout(() => {
+              setExportingGif(false)
+              setExportProgress(null)
+              setEncodeProgress(null)
+            }, 500)
+          }
+        },
+      )
+    }, 0)
   }, [exportingGif, playlistItems])
 
   if (missingEnvVars.length > 0) {
@@ -315,6 +315,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
           onExportGif={handleExportGif}
           exportingGif={exportingGif}
           exportProgress={exportProgress}
+          encodeProgress={encodeProgress}
         />
       </div>
 

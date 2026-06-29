@@ -27,6 +27,7 @@ interface LeftPanelProps {
   onExportGif: () => void
   exportingGif: boolean
   exportProgress: { done: number; total: number } | null
+  encodeProgress: number | null
 }
 
 export function LeftPanel({
@@ -47,6 +48,7 @@ export function LeftPanel({
   onExportGif,
   exportingGif,
   exportProgress,
+  encodeProgress,
 }: LeftPanelProps) {
   const [activeTab, setActiveTab] = useState<ActiveTab>('query')
   const mono = "'Courier New', monospace"
@@ -183,6 +185,7 @@ export function LeftPanel({
           onExportGif={onExportGif}
           exportingGif={exportingGif}
           exportProgress={exportProgress}
+          encodeProgress={encodeProgress}
           fontSize={fontSize}
         />
       </div>

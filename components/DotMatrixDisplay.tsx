@@ -722,7 +722,9 @@ export interface DotMatrixDisplayHandle {
    * @param items     Ordered array of items to include.
    * @param filename  Suggested download filename (default: "presentation.gif")
    * @param onProgress  Optional callback: called with (completedItems, totalItems)
-   *                    after each item is fully encoded.
+   *                    after each item's frames are built (pre-encoding phase).
+   * @param onEncodeProgress  Optional callback: called with a 0–1 fraction as
+   *                          the GIF worker encodes frames.
    */
   capturePlaylistGif(
     items: Array<{
@@ -733,6 +735,7 @@ export interface DotMatrixDisplayHandle {
     }>,
     filename?: string,
     onProgress?: (done: number, total: number) => void,
+    onEncodeProgress?: (fraction: number) => void,
   ): void
 }
 
@@ -1358,7 +1361,7 @@ function DotMatrixDisplay({ segments, text = '', loading = false, streamEnergy =
       })
     },
 
-    capturePlaylistGif(items, filename = 'presentation.gif', onProgress) {
+    capturePlaylistGif(items, filename = 'presentation.gif', onProgress, onEncodeProgress) {
       const canvas = canvasRef.current
       const d = dimsRef.current
       if (!canvas || !d || items.length === 0) return
@@ -1481,6 +1484,10 @@ function DotMatrixDisplay({ segments, text = '', loading = false, streamEnergy =
 
           onProgress?.(itemIdx + 1, items.length)
         }
+
+        gif.on('progress', (fraction: number) => {
+          onEncodeProgress?.(fraction)
+        })
 
         gif.on('finished', (blob: Blob) => {
           const url = URL.createObjectURL(blob)

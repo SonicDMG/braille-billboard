@@ -14,6 +14,7 @@ interface PlaylistPanelProps {
   onExportGif: () => void
   exportingGif: boolean
   exportProgress: { done: number; total: number } | null
+  encodeProgress: number | null
   fontSize: number
 }
 
@@ -28,6 +29,7 @@ export function PlaylistPanel({
   onExportGif,
   exportingGif,
   exportProgress,
+  encodeProgress,
   fontSize,
 }: PlaylistPanelProps) {
   const sm = fontSize * 0.65
@@ -90,11 +92,13 @@ export function PlaylistPanel({
     setDragOverId(null)
   }
 
-  const exportLabel = exportingGif && exportProgress
-    ? `⠿ ENCODING ${exportProgress.done}/${exportProgress.total}`
-    : exportingGif
-      ? '⠿ ENCODING...'
-      : '⠾ EXPORT GIF'
+  const exportLabel = exportingGif && encodeProgress !== null
+    ? `⠿ RENDERING ${Math.round(encodeProgress * 100)}%`
+    : exportingGif && exportProgress
+      ? `⠿ ENCODING ${exportProgress.done}/${exportProgress.total}`
+      : exportingGif
+        ? '⠿ ENCODING...'
+        : '⠾ EXPORT GIF'
 
   return (
     <div
