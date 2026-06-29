@@ -41,7 +41,9 @@ type CycleAction =
   | { type: 'JUMP_TO'; index: number }
   | { type: 'ITEM_SPRITE_SET'; id: string; spriteData: SpriteData | null }
   | { type: 'SET_GROUP'; key: string | null }
-  | { type: 'ITEM_INCLUSION_SET'; id: string; included: boolean }
+  | { type: 'ITEM_INCLUSION_SET'; id: string; included: boolean }  // legacy — kept for PATCH route compat
+  | { type: 'PLAYLIST_SET'; id: string; playlistOrder: number | null }
+  | { type: 'PLAYLIST_REORDERED'; orderedIds: string[] }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Group-aware helpers
@@ -52,12 +54,12 @@ type CycleAction =
  * When groupKey is null, all indices are included.
  */
 function groupIndices(items: BillboardItem[], groupKey: string | null): number[] {
-  return items.reduce<number[]>((acc, item, i) => {
-    if (!item.included) return acc
-    if (groupKey !== null && item.filterKey !== groupKey) return acc
-    acc.push(i)
-    return acc
-  }, [])
+  return items
+    .map((item, i) => ({ item, i }))
+    .filter(({ item }) => item.playlistOrder !== null)
+    .filter(({ item }) => groupKey === null || item.filterKey === groupKey)
+    .sort((a, b) => (a.item.playlistOrder ?? 0) - (b.item.playlistOrder ?? 0))
+    .map(({ i }) => i)
 }
 
 /**
@@ -268,6 +270,21 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       return { ...state, items }
     }
 
+    case 'PLAYLIST_SET': {
+      const items = state.items.map(it =>
+        it.id === action.id ? { ...it, playlistOrder: action.playlistOrder } : it
+      )
+      return { ...state, items }
+    }
+
+    case 'PLAYLIST_REORDERED': {
+      const items = state.items.map(it => {
+        const idx = action.orderedIds.indexOf(it.id)
+        return { ...it, playlistOrder: idx === -1 ? null : idx }
+      })
+      return { ...state, items }
+    }
+
     case 'SET_GROUP': {
       // Switching group — find the first item in the new group (or keep current if in group).
       const key = action.key
@@ -347,6 +364,7 @@ export function useCycle({
             spriteData: it.spriteData ?? null,
             filterKey: it.filterKey ?? '',
             included: it.included ?? true,
+            playlistOrder: it.playlistOrder ?? null,
           }))
           for (const item of items) {
             cacheRef.current.set(item.query.trim().toLowerCase(), {
@@ -522,15 +540,14 @@ export function useCycle({
   const addItem = useCallback((query: string, chatId: string | null, data: VisualizationData, audioB64: string | null) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     const filterKey = extractFilterKey(query)
-    const item: BillboardItem = { id, query, chatId, data, audioB64, spriteData: null, filterKey, included: true }
+    // New items start outside the playlist — user must explicitly add them
+    const item: BillboardItem = { id, query, chatId, data, audioB64, spriteData: null, filterKey, included: true, playlistOrder: null }
     dispatch({ type: 'ITEM_ADDED', item })
-    // If we were idle, start cycling immediately
-    dispatch({ type: 'START_NEXT' })
     // Persist to SQLite — fire-and-forget, UI is not gated on write.
     void fetch('/api/items', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, query, chatId, data, audioB64, filterKey, included: true }),
+      body: JSON.stringify({ id, query, chatId, data, audioB64, filterKey, included: true, playlistOrder: null }),
     })
   }, [])
 
@@ -607,6 +624,7 @@ export function useCycle({
 
   /**
    * Toggle an item's inclusion in the cycle and persist the change.
+   * @deprecated — superseded by addToPlaylist/removeFromPlaylist; kept for PATCH route compat.
    */
   const setItemIncluded = useCallback((id: string, included: boolean) => {
     dispatch({ type: 'ITEM_INCLUSION_SET', id, included })
@@ -614,6 +632,44 @@ export function useCycle({
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ included }),
+    })
+  }, [])
+
+  /** Add an item to the end of the playlist. No-op if already in the playlist. */
+  const addToPlaylist = useCallback((id: string) => {
+    const current = stateRef.current.items.find(it => it.id === id)
+    if (!current || current.playlistOrder !== null) return
+    // Compute next order from current state
+    const maxOrder = stateRef.current.items.reduce<number>((max, it) =>
+      it.playlistOrder !== null && it.playlistOrder > max ? it.playlistOrder : max, -1)
+    const nextOrder = maxOrder + 1
+    dispatch({ type: 'PLAYLIST_SET', id, playlistOrder: nextOrder })
+    // If the cycle was idle, kick it off now
+    dispatch({ type: 'START_NEXT' })
+    void fetch('/api/playlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, action: 'add' }),
+    })
+  }, [])
+
+  /** Remove an item from the playlist. No-op if not in the playlist. */
+  const removeFromPlaylist = useCallback((id: string) => {
+    dispatch({ type: 'PLAYLIST_SET', id, playlistOrder: null })
+    void fetch('/api/playlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, action: 'remove' }),
+    })
+  }, [])
+
+  /** Reorder the playlist by providing a new fully-ordered array of item ids. */
+  const reorderPlaylistItems = useCallback((orderedIds: string[]) => {
+    dispatch({ type: 'PLAYLIST_REORDERED', orderedIds })
+    void fetch('/api/playlist/reorder', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: orderedIds }),
     })
   }, [])
 
@@ -631,5 +687,8 @@ export function useCycle({
     setItemSprite,
     removeItemSprite,
     setItemIncluded,
+    addToPlaylist,
+    removeFromPlaylist,
+    reorderPlaylistItems,
   }
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import type { BillboardItem } from '@/lib/types'
 
 interface BillboardListProps {
@@ -13,9 +13,8 @@ interface BillboardListProps {
   onRemoveSprite: (id: string) => void
   onDownloadGif: (id: string) => void
   onSetGroup: (key: string | null) => void
-  onToggleIncluded: (id: string, included: boolean) => void
-  onExportPresentationGif: () => void
-  exportingPresentation: boolean
+  onAddToPlaylist: (id: string) => void
+  onRemoveFromPlaylist: (id: string) => void
   fontSize: number
 }
 
@@ -35,16 +34,36 @@ export function BillboardList({
   onRemoveSprite,
   onDownloadGif,
   onSetGroup,
-  onToggleIncluded,
-  onExportPresentationGif,
-  exportingPresentation,
+  onAddToPlaylist,
+  onRemoveFromPlaylist,
   fontSize,
 }: BillboardListProps) {
   const sm = fontSize * 0.65
   const xs = fontSize * 0.55
 
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
-  // Hidden file input ref — one per list, reused for whichever active item triggers it
+  // "Selected" row in the Query tab — drives which item shows sprite controls.
+  // Defaults to the active (playing) item; follows it when it changes externally.
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // Keep selectedId tracking the active item when it changes due to auto-cycle.
+  const prevActiveIndexRef = useRef(activeIndex)
+  useEffect(() => {
+    if (prevActiveIndexRef.current !== activeIndex) {
+      prevActiveIndexRef.current = activeIndex
+      const item = items[activeIndex]
+      if (item) setSelectedId(item.id)
+    }
+  }, [activeIndex, items])
+
+  // On first load, select the active item.
+  useEffect(() => {
+    if (selectedId === null && items.length > 0) {
+      const item = items[activeIndex]
+      if (item) setSelectedId(item.id)
+    }
+  }, [items, activeIndex, selectedId])
+
+  // Hidden file input ref — one per list, reused for whichever selected item triggers it
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pendingUploadIdRef = useRef<string | null>(null)
 
@@ -64,6 +83,11 @@ export function BillboardList({
   const triggerUpload = (id: string) => {
     pendingUploadIdRef.current = id
     fileInputRef.current?.click()
+  }
+
+  const handleRowClick = (idx: number, id: string) => {
+    setSelectedId(id)
+    onSelect(idx)
   }
 
   // Derive unique groups in order of first appearance
@@ -102,62 +126,15 @@ export function BillboardList({
       {/* Header row */}
       <div
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          fontFamily: mono,
+          fontSize: `${xs}px`,
+          color: '#555555',
+          letterSpacing: 2,
           paddingBottom: 4,
           flexShrink: 0,
         }}
       >
-        <span
-          style={{
-            fontFamily: mono,
-            fontSize: `${xs}px`,
-            color: '#555555',
-            letterSpacing: 2,
-          }}
-        >
-          BILLBOARD — {items.length} ITEM{items.length !== 1 ? 'S' : ''}
-        </span>
-
-        {/* Bulk inclusion toggle */}
-        {(() => {
-          const allIncluded = items.every(it => it.included)
-          const allExcluded = items.every(it => !it.included)
-          const label = allIncluded ? 'EXCL ALL' : 'INCL ALL'
-          const nextState = allIncluded ? false : true
-          return (
-            <button
-              onClick={() => items.forEach(it => onToggleIncluded(it.id, nextState))}
-              title={allIncluded ? 'Exclude all from cycle' : allExcluded ? 'Include all in cycle' : 'Include all in cycle'}
-              style={{
-                background: 'none',
-                border: `1px solid #2a2a2a`,
-                color: allExcluded ? '#666666' : '#444444',
-                fontFamily: mono,
-                fontSize: `${xs * 0.85}px`,
-                cursor: 'pointer',
-                padding: '1px 5px',
-                borderRadius: 2,
-                letterSpacing: 1,
-                flexShrink: 0,
-                transition: 'color 0.15s, border-color 0.15s',
-              }}
-              onMouseEnter={e => {
-                const btn = e.currentTarget as HTMLButtonElement
-                btn.style.color = '#aaaaaa'
-                btn.style.borderColor = '#444444'
-              }}
-              onMouseLeave={e => {
-                const btn = e.currentTarget as HTMLButtonElement
-                btn.style.color = allExcluded ? '#666666' : '#444444'
-                btn.style.borderColor = '#2a2a2a'
-              }}
-            >
-              {label}
-            </button>
-          )
-        })()}
+        QUERY — {items.length} ITEM{items.length !== 1 ? 'S' : ''}
       </div>
 
       {/* Group selector — only shown when there are multiple groups */}
@@ -255,89 +232,66 @@ export function BillboardList({
             )
           }
 
-          const isActive = idx === activeIndex % items.length
-          const isHovered = hoveredIdx === idx
+          const isPlaying = idx === activeIndex % items.length
+          const isSelected = item.id === selectedId
           const hasSprite = item.spriteData != null
-          const isIncluded = item.included
+          const isInPlaylist = item.playlistOrder !== null
+
           rows.push(
             <div
               key={item.id}
-              onClick={() => onSelect(idx)}
-              onMouseEnter={() => setHoveredIdx(idx)}
-              onMouseLeave={() => setHoveredIdx(null)}
+              onClick={() => handleRowClick(idx, item.id)}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
                 padding: '4px 6px',
-                border: `1px solid ${isActive ? '#4a4a4a' : '#2a2a2a'}`,
+                border: `1px solid ${isSelected ? '#4a4a4a' : isPlaying ? '#3a3a3a' : '#2a2a2a'}`,
                 borderRadius: 2,
-                background: isActive ? '#111111' : 'transparent',
-                opacity: isIncluded ? 1 : 0.35,
-                transition: 'background 0.3s, border-color 0.3s, opacity 0.2s',
+                background: isSelected ? '#111111' : 'transparent',
+                transition: 'background 0.2s, border-color 0.2s',
                 flexShrink: 0,
-                cursor: isActive ? 'default' : 'pointer',
+                cursor: isSelected ? 'default' : 'pointer',
               }}
             >
-              {/* Inclusion toggle — always visible on every row */}
-              <button
-                onClick={e => { e.stopPropagation(); onToggleIncluded(item.id, !isIncluded) }}
-                title={isIncluded ? 'Exclude from cycle' : 'Include in cycle'}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: isIncluded ? '#666666' : '#333333',
-                  fontFamily: mono,
-                  fontSize: `${xs}px`,
-                  cursor: 'pointer',
-                  padding: '0 2px',
-                  flexShrink: 0,
-                  lineHeight: 1,
-                  transition: 'color 0.15s',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = isIncluded ? '#999999' : '#666666' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = isIncluded ? '#666666' : '#333333' }}
-              >
-                {isIncluded ? '⠶' : '⠠'}
-              </button>
-
-              {/* Active indicator */}
+              {/* Playing indicator — ⠿ when this item is actively cycling on the billboard */}
               <span
                 style={{
-                    fontFamily: mono,
-                    fontSize: `${xs}px`,
-                    color: isActive ? '#888888' : '#555555',
-                    flexShrink: 0,
-                    transition: 'color 0.3s',
-                  }}
+                  fontFamily: mono,
+                  fontSize: `${xs}px`,
+                  color: isPlaying ? '#888888' : '#333333',
+                  flexShrink: 0,
+                  transition: 'color 0.3s',
+                }}
+                title={isPlaying ? 'Now playing' : undefined}
               >
-                {isActive ? '⠿' : '·'}
+                {isPlaying ? '⠿' : '·'}
               </span>
 
               {/* Query label */}
               <span
                 style={{
-                    fontFamily: mono,
-                    fontSize: `${sm}px`,
-                    color: isActive ? '#cccccc' : isHovered ? '#999999' : '#777777',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    flex: 1,
-                    transition: 'color 0.3s',
-                  }}
+                  fontFamily: mono,
+                  fontSize: `${sm}px`,
+                  color: isSelected ? '#cccccc' : isPlaying ? '#999999' : '#777777',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  flex: 1,
+                  transition: 'color 0.2s',
+                }}
                 title={item.query}
               >
                 {item.query}
               </span>
 
-              {/* Upload / remove sprite — active item only */}
-              {isActive && (
+              {/* ── Controls — visible on selected row ───────────────── */}
+              {isSelected && (
                 <>
-                  {/* Upload button — shows ⊕ normally, ⊙ when a sprite is already attached */}
+                  {/* Image upload — ▣ when has sprite, ▢ when empty */}
                   <button
                     onClick={e => { e.stopPropagation(); triggerUpload(item.id) }}
-                    title={hasSprite ? 'Replace logo image' : 'Upload logo image'}
+                    title={hasSprite ? 'Replace custom image' : 'Upload custom image'}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -353,14 +307,14 @@ export function BillboardList({
                     onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc9933' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = hasSprite ? '#aa8833' : '#555555' }}
                   >
-                    {hasSprite ? '⊙' : '⊕'}
+                    {hasSprite ? '▣' : '▢'}
                   </button>
 
-                  {/* Remove sprite button — only when a sprite is attached */}
+                  {/* Remove sprite — only when one is attached */}
                   {hasSprite && (
                     <button
                       onClick={e => { e.stopPropagation(); onRemoveSprite(item.id) }}
-                      title="Remove logo image"
+                      title="Remove custom image"
                       style={{
                         background: 'none',
                         border: 'none',
@@ -380,7 +334,7 @@ export function BillboardList({
                     </button>
                   )}
 
-                  {/* Download GIF button */}
+                  {/* Download GIF */}
                   <button
                     onClick={e => { e.stopPropagation(); onDownloadGif(item.id) }}
                     title="Download as animated GIF"
@@ -404,14 +358,40 @@ export function BillboardList({
                 </>
               )}
 
-              {/* Delete button */}
+              {/* Playlist toggle — ⊕ add / ⊙ remove — always visible */}
+              <button
+                onClick={e => {
+                  e.stopPropagation()
+                  if (isInPlaylist) onRemoveFromPlaylist(item.id)
+                  else onAddToPlaylist(item.id)
+                }}
+                title={isInPlaylist ? 'Remove from playlist' : 'Add to playlist'}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isInPlaylist ? '#aa8833' : '#444444',
+                  fontFamily: mono,
+                  fontSize: `${xs}px`,
+                  cursor: 'pointer',
+                  padding: '0 2px',
+                  flexShrink: 0,
+                  lineHeight: 1,
+                  transition: 'color 0.15s',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = isInPlaylist ? '#cc9933' : '#888888' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = isInPlaylist ? '#aa8833' : '#444444' }}
+              >
+                {isInPlaylist ? '⊙' : '⊕'}
+              </button>
+
+              {/* Delete */}
               <button
                 onClick={e => { e.stopPropagation(); onDelete(item.id) }}
                 title={`Remove "${item.query}"`}
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: '#555555',
+                  color: '#444444',
                   fontFamily: mono,
                   fontSize: `${xs}px`,
                   cursor: 'pointer',
@@ -421,7 +401,7 @@ export function BillboardList({
                   transition: 'color 0.15s',
                 }}
                 onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#cc4444' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#444444' }}
               >
                 ✕
               </button>

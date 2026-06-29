@@ -18,12 +18,16 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  let spriteData: SpriteData | null = null
+  let spriteData: SpriteData | null | undefined = undefined  // undefined = not provided
   let included: boolean | undefined
   try {
     const body = await req.json() as { spriteData?: unknown; included?: unknown }
-    if (body.spriteData && typeof body.spriteData === 'object' && !Array.isArray(body.spriteData)) {
-      spriteData = body.spriteData as SpriteData
+    if ('spriteData' in body) {
+      if (body.spriteData && typeof body.spriteData === 'object' && !Array.isArray(body.spriteData)) {
+        spriteData = body.spriteData as SpriteData
+      } else {
+        spriteData = null  // explicit null/falsy = intentional clear
+      }
     }
     if (typeof body.included === 'boolean') {
       included = body.included
@@ -31,7 +35,7 @@ export async function PATCH(
   } catch { /* no body — no-op */ }
 
   if (included !== undefined) updateItemIncluded(id, included)
-  updateItemSprite(id, spriteData)
+  if (spriteData !== undefined) updateItemSprite(id, spriteData)
   return Response.json({ ok: true })
 }
 
