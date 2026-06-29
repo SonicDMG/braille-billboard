@@ -325,15 +325,16 @@ export function* explodingEntranceFrames(opts: EntranceOptions): Generator<Alpha
 
 /**
  * Dots drop into place column by column, left to right. Within each column,
- * dots light up top-to-bottom one row at a time — mimicking a Tetris piece
- * falling and stacking. A new column starts every COL_STRIDE ticks; rows
- * within the column are revealed one per tick, so the drop is visible.
- * ~total ticks ≈ numCols * COL_STRIDE + numRows at 30 ms each — halved for speed.
+ * dots light up top-to-bottom — mimicking a Tetris piece falling and stacking.
+ *
+ * COLS_PER_TICK controls how many columns start their drop each tick (30 ms).
+ * At 3 cols/tick a 40-column segment sweeps in ~14 ticks (~420 ms).
+ * The within-column drop is one row group per tick so the fall is still visible.
  */
 export function* tetrisEntranceFrames(opts: EntranceOptions): Generator<AlphaMap> {
   const { bounds, litKeys } = opts
-  // Ticks between starting each successive column's drop — 2 for double speed.
-  const COL_STRIDE = 2
+  const COLS_PER_TICK  = 3  // columns whose drop starts each tick
+  const ROWS_PER_TICK  = 3  // dot rows that land per tick within each dropping column
 
   const segKeys = keysInBounds(litKeys, bounds)
 
@@ -342,9 +343,7 @@ export function* tetrisEntranceFrames(opts: EntranceOptions): Generator<AlphaMap
   for (const key of segKeys) colSet.add(parseInt(key.split(',')[1]!, 10))
   const sortedCols = Array.from(colSet).sort((a, b) => a - b)
 
-  // For each dot: birth tick = colIdx * COL_STRIDE + rowRank within that column.
-  // rowRank is 0 for the topmost lit dot in the column, increasing downward.
-  // Build rowRank per column.
+  // Build sorted row list per column (top → bottom).
   const colRows = new Map<number, number[]>()
   for (const key of segKeys) {
     const c = parseInt(key.split(',')[1]!, 10)
@@ -353,16 +352,17 @@ export function* tetrisEntranceFrames(opts: EntranceOptions): Generator<AlphaMap
     arr.push(r)
     colRows.set(c, arr)
   }
-  // Sort each column's rows top → bottom.
   for (const [c, rows] of colRows) colRows.set(c, rows.sort((a, b) => a - b))
 
+  // Column start tick = floor(colIdx / COLS_PER_TICK) — N columns share the same tick.
+  // Within each column the drop adds floor(rowRank / ROWS_PER_TICK) extra ticks.
   const birthTick = new Map<string, number>()
   for (const key of segKeys) {
     const c = parseInt(key.split(',')[1]!, 10)
     const r = parseInt(key.split(',')[0]!, 10)
     const colIdx = sortedCols.indexOf(c)
     const rowRank = colRows.get(c)!.indexOf(r)
-    birthTick.set(key, colIdx * COL_STRIDE + rowRank)
+    birthTick.set(key, Math.floor(colIdx / COLS_PER_TICK) + Math.floor(rowRank / ROWS_PER_TICK))
   }
 
   let tick = 0
