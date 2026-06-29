@@ -1,5 +1,6 @@
 'use client'
 
+import { useRef, useState } from 'react'
 import type { BillboardItem } from '@/lib/types'
 
 interface PlaylistPanelProps {
@@ -9,6 +10,7 @@ interface PlaylistPanelProps {
   onRemove: (id: string) => void
   onMoveUp: (id: string) => void
   onMoveDown: (id: string) => void
+  onReorder: (orderedIds: string[]) => void
   onExportGif: () => void
   exportingGif: boolean
   exportProgress: { done: number; total: number } | null
@@ -22,6 +24,7 @@ export function PlaylistPanel({
   onRemove,
   onMoveUp,
   onMoveDown,
+  onReorder,
   onExportGif,
   exportingGif,
   exportProgress,
@@ -35,6 +38,57 @@ export function PlaylistPanel({
   const playlist = items
     .filter(it => it.playlistOrder !== null)
     .sort((a, b) => (a.playlistOrder ?? 0) - (b.playlistOrder ?? 0))
+
+  // ── Drag-and-drop state ────────────────────────────────────────────────────
+  const dragIdRef = useRef<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [dragOverPos, setDragOverPos] = useState<'above' | 'below'>('below')
+
+  const handleDragStart = (id: string, e: React.DragEvent) => {
+    dragIdRef.current = id
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (id: string, e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const rect = e.currentTarget.getBoundingClientRect()
+    const midY = rect.top + rect.height / 2
+    setDragOverId(id)
+    setDragOverPos(e.clientY < midY ? 'above' : 'below')
+  }
+
+  const handleDragLeave = () => {
+    setDragOverId(null)
+  }
+
+  const handleDrop = (targetId: string, e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const srcId = dragIdRef.current
+    dragIdRef.current = null
+    setDragOverId(null)
+    if (!srcId || srcId === targetId) return
+
+    const ids = playlist.map(it => it.id)
+    const srcIdx = ids.indexOf(srcId)
+    const tgtIdx = ids.indexOf(targetId)
+    if (srcIdx === -1 || tgtIdx === -1) return
+
+    // Remove src from list, insert before or after target
+    const rect = e.currentTarget.getBoundingClientRect()
+    const midY = rect.top + rect.height / 2
+    const insertAfter = e.clientY >= midY
+
+    ids.splice(srcIdx, 1)
+    const newTgt = ids.indexOf(targetId)
+    ids.splice(insertAfter ? newTgt + 1 : newTgt, 0, srcId)
+    onReorder(ids)
+  }
+
+  const handleDragEnd = () => {
+    dragIdRef.current = null
+    setDragOverId(null)
+  }
 
   const exportLabel = exportingGif && exportProgress
     ? `⠿ ENCODING ${exportProgress.done}/${exportProgress.total}`
@@ -95,10 +149,17 @@ export function PlaylistPanel({
             const isActive = globalIdx === activeIndex
             const isFirst = pos === 0
             const isLast = pos === playlist.length - 1
+            const isDragOver = dragOverId === item.id
 
             return (
               <div
                 key={item.id}
+                draggable
+                onDragStart={e => handleDragStart(item.id, e)}
+                onDragOver={e => handleDragOver(item.id, e)}
+                onDragLeave={handleDragLeave}
+                onDrop={e => handleDrop(item.id, e)}
+                onDragEnd={handleDragEnd}
                 onClick={() => onSelect(globalIdx)}
                 style={{
                   display: 'flex',
@@ -108,11 +169,36 @@ export function PlaylistPanel({
                   border: `1px solid ${isActive ? '#4a4a4a' : '#2a2a2a'}`,
                   borderRadius: 2,
                   background: isActive ? '#111111' : 'transparent',
+                  outline: isDragOver
+                    ? `1px solid #555555`
+                    : 'none',
+                  outlineOffset: isDragOver && dragOverPos === 'above' ? '-1px' : '-1px',
+                  boxShadow: isDragOver
+                    ? dragOverPos === 'above'
+                      ? 'inset 0 2px 0 #666666'
+                      : 'inset 0 -2px 0 #666666'
+                    : 'none',
                   transition: 'background 0.3s, border-color 0.3s',
                   flexShrink: 0,
-                  cursor: isActive ? 'default' : 'pointer',
+                  cursor: 'grab',
                 }}
               >
+                {/* Drag handle */}
+                <span
+                  style={{
+                    fontFamily: mono,
+                    fontSize: `${xs * 0.85}px`,
+                    color: '#333333',
+                    flexShrink: 0,
+                    cursor: 'grab',
+                    lineHeight: 1,
+                    userSelect: 'none',
+                  }}
+                  title="Drag to reorder"
+                >
+                  ⠿⠿
+                </span>
+
                 {/* Position number */}
                 <span
                   style={{

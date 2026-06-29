@@ -303,6 +303,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
           onRemoveFromPlaylist={removeFromPlaylist}
           onMoveUp={handleMoveUp}
           onMoveDown={handleMoveDown}
+          onReorderPlaylist={reorderPlaylistItems}
           onExportGif={handleExportGif}
           exportingGif={exportingGif}
           exportProgress={exportProgress}

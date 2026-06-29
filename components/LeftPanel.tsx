@@ -23,6 +23,7 @@ interface LeftPanelProps {
   onRemoveFromPlaylist: (id: string) => void
   onMoveUp: (id: string) => void
   onMoveDown: (id: string) => void
+  onReorderPlaylist: (orderedIds: string[]) => void
   onExportGif: () => void
   exportingGif: boolean
   exportProgress: { done: number; total: number } | null
@@ -42,6 +43,7 @@ export function LeftPanel({
   onRemoveFromPlaylist,
   onMoveUp,
   onMoveDown,
+  onReorderPlaylist,
   onExportGif,
   exportingGif,
   exportProgress,
@@ -177,6 +179,7 @@ export function LeftPanel({
           onRemove={onRemoveFromPlaylist}
           onMoveUp={onMoveUp}
           onMoveDown={onMoveDown}
+          onReorder={onReorderPlaylist}
           onExportGif={onExportGif}
           exportingGif={exportingGif}
           exportProgress={exportProgress}
