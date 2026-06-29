@@ -249,3 +249,132 @@ export function* typewriterEntranceFrames(opts: EntranceOptions): Generator<Alph
     yield alpha
   }
 }
+
+// ---------------------------------------------------------------------------
+// exploding
+// ---------------------------------------------------------------------------
+
+/**
+ * Starts with only the centre dots lit, then radiates outward in all
+ * directions simultaneously. Each dot's birth tick is proportional to its
+ * distance from the centroid, with small random jitter so the wave front
+ * breaks into individual sparks rather than a smooth ring.
+ * Hard snap-on per dot — no fade — so each spark feels like an impact.
+ * ~12 ticks total per segment at 30 ms ≈ ~360 ms.
+ */
+export function* explodingEntranceFrames(opts: EntranceOptions): Generator<AlphaMap> {
+  const { bounds, litKeys } = opts
+  // Ticks for the wave to travel from the centroid to the furthest dot.
+  const SWEEP_TICKS = 10
+  // Max random offset applied to each dot's nominal birth tick (±JITTER).
+  // Kept small so the radial wave is still readable but the edge is ragged.
+  const JITTER = 2
+
+  const segKeys = keysInBounds(litKeys, bounds)
+
+  // Compute centroid of all lit dots in the segment.
+  let sumR = 0, sumC = 0
+  for (const key of segKeys) {
+    const [rs, cs] = key.split(',')
+    sumR += parseInt(rs!, 10)
+    sumC += parseInt(cs!, 10)
+  }
+  const n = segKeys.length || 1
+  const centR = sumR / n
+  const centC = sumC / n
+
+  // Compute max distance for normalisation.
+  let maxDist = 0
+  for (const key of segKeys) {
+    const [rs, cs] = key.split(',')
+    const dr = parseInt(rs!, 10) - centR
+    const dc = parseInt(cs!, 10) - centC
+    const d = Math.sqrt(dr * dr + dc * dc)
+    if (d > maxDist) maxDist = d
+  }
+  if (maxDist === 0) maxDist = 1
+
+  // Assign each dot a birth tick: 0 at centroid, SWEEP_TICKS at edge, ±JITTER noise.
+  const birthTick = new Map<string, number>()
+  for (const key of segKeys) {
+    const [rs, cs] = key.split(',')
+    const dr = parseInt(rs!, 10) - centR
+    const dc = parseInt(cs!, 10) - centC
+    const d = Math.sqrt(dr * dr + dc * dc)
+    const nominal = Math.round(SWEEP_TICKS * (d / maxDist))
+    const jitter = Math.floor(Math.random() * (JITTER * 2 + 1)) - JITTER
+    birthTick.set(key, Math.max(0, nominal + jitter))
+  }
+
+  let tick = 0
+
+  while (true) {
+    const alpha: AlphaMap = new Map()
+    for (const key of segKeys) {
+      // Dot is dark until its birth tick, then snaps on instantly.
+      alpha.set(key, tick >= birthTick.get(key)! ? 1 : 0)
+    }
+    tick++
+    yield alpha
+  }
+}
+
+// ---------------------------------------------------------------------------
+// tetris
+// ---------------------------------------------------------------------------
+
+/**
+ * Dots drop into place column by column, left to right. Within each column,
+ * dots light up top-to-bottom one row at a time — mimicking a Tetris piece
+ * falling and stacking. A new column starts every COL_STRIDE ticks; rows
+ * within the column are revealed one per tick, so the drop is visible.
+ * ~total ticks ≈ numCols * COL_STRIDE + numRows at 30 ms each — halved for speed.
+ */
+export function* tetrisEntranceFrames(opts: EntranceOptions): Generator<AlphaMap> {
+  const { bounds, litKeys } = opts
+  // Ticks between starting each successive column's drop — 2 for double speed.
+  const COL_STRIDE = 2
+
+  const segKeys = keysInBounds(litKeys, bounds)
+
+  // Collect active columns sorted left → right.
+  const colSet = new Set<number>()
+  for (const key of segKeys) colSet.add(parseInt(key.split(',')[1]!, 10))
+  const sortedCols = Array.from(colSet).sort((a, b) => a - b)
+
+  // For each dot: birth tick = colIdx * COL_STRIDE + rowRank within that column.
+  // rowRank is 0 for the topmost lit dot in the column, increasing downward.
+  // Build rowRank per column.
+  const colRows = new Map<number, number[]>()
+  for (const key of segKeys) {
+    const c = parseInt(key.split(',')[1]!, 10)
+    const r = parseInt(key.split(',')[0]!, 10)
+    const arr = colRows.get(c) ?? []
+    arr.push(r)
+    colRows.set(c, arr)
+  }
+  // Sort each column's rows top → bottom.
+  for (const [c, rows] of colRows) colRows.set(c, rows.sort((a, b) => a - b))
+
+  const birthTick = new Map<string, number>()
+  for (const key of segKeys) {
+    const c = parseInt(key.split(',')[1]!, 10)
+    const r = parseInt(key.split(',')[0]!, 10)
+    const colIdx = sortedCols.indexOf(c)
+    const rowRank = colRows.get(c)!.indexOf(r)
+    birthTick.set(key, colIdx * COL_STRIDE + rowRank)
+  }
+
+  let tick = 0
+
+  while (true) {
+    const alpha: AlphaMap = new Map()
+    for (const key of segKeys) {
+      const birth = birthTick.get(key)!
+      // Snap on instantly when born — no fade, hard landing like a piece placing.
+      alpha.set(key, tick >= birth ? 1 : 0)
+    }
+    tick++
+    yield alpha
+  }
+}

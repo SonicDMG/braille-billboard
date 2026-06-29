@@ -40,7 +40,7 @@ Search the documents for the answer. Respond with this exact JSON — no prose, 
     { "text": "<SUBJECT NAME — the name of the person, product, or entity this billboard is about. 1 to 3 words maximum. This is the brand signature at the bottom of the billboard.>", "color": { "type": "solid", "hex": "gold" } }
   ],
   "dataPoints": [],
-  "entranceStyle": "<one of: fly-in | dissolve | sparkle | typewriter>",
+  "entranceStyle": "<one of: fly-in | dissolve | sparkle | typewriter | exploding | tetris>",
   "visualDescription": "<1–2 sentences describing what the subject looks like — appearance, colors, defining features. Written for an image-generation model, not a reader. Omit for abstract or data queries.>"
 }
 
@@ -77,6 +77,8 @@ ENTRANCE STYLE GUIDE — choose the style that fits the subject mood:
 - dissolve:  slow, atmospheric — cinematic, contemplative
 - sparkle:   celebratory, electric — upbeat, festive
 - typewriter: deliberate, weighty — somber, minimal
+- exploding: intense, dramatic — power, revelation, impact
+- tetris:    structured, methodical — data, systems, precision
 
 COLOR RULES:
 - Body copy: use solid warm colors (amber, orange, gold) or thematic colors matching the subject.

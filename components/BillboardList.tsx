@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState, useEffect } from 'react'
-import type { BillboardItem, BillboardSegmentText, VisualizationData } from '@/lib/types'
+import type { BillboardItem, BillboardSegmentText, EntranceStyle, VisualizationData } from '@/lib/types'
 
 interface BillboardListProps {
   items: BillboardItem[]
@@ -61,6 +61,8 @@ export function BillboardList({
   const [editingId, setEditingId] = useState<string | null>(null)
   // Draft segment texts while editing (up to 3)
   const [draftTexts, setDraftTexts] = useState<string[]>([])
+  // Draft entrance style: explicit EntranceStyle, 'random' (runtime random), or 'llm' (LLM choice)
+  const [draftEntrance, setDraftEntrance] = useState<EntranceStyle | 'random' | 'llm'>('llm')
 
   // Keep selectedId tracking the active item when it changes due to auto-cycle.
   const prevActiveIndexRef = useRef(activeIndex)
@@ -112,6 +114,8 @@ export function BillboardList({
   const openEditor = (item: BillboardItem) => {
     setEditingId(item.id)
     setDraftTexts(getSegmentTexts(item))
+    // Initialise picker: if item has an explicit style use it, else 'llm' (LLM/undefined)
+    setDraftEntrance(item.data.entranceStyle ?? 'llm')
   }
 
   const closeEditor = () => {
@@ -133,6 +137,12 @@ export function BillboardList({
       // Legacy: update words and summary with the single draft text
       const text = draftTexts[0] ?? ''
       newData = { ...newData, words: text, summary: text }
+    }
+    // 'llm' = leave the LLM's original entranceStyle untouched in data.
+    // 'random' = store the literal 'random' sentinel — Billboard re-rolls each transition.
+    // Any explicit style = written directly, overriding the LLM choice.
+    if (draftEntrance !== 'llm') {
+      newData = { ...newData, entranceStyle: draftEntrance }
     }
     onUpdateItem(item.id, newData)
     closeEditor()
@@ -486,6 +496,16 @@ export function BillboardList({
           // Inline editor — shown below the selected row when ✎ is active
           if (editingId === item.id) {
             const segLabels = ['Section 1', 'Section 2', 'Section 3']
+            const entranceOptions: Array<{ value: EntranceStyle | 'random' | 'llm'; label: string; title: string }> = [
+              { value: 'llm',        label: 'LLM',        title: 'Use the style chosen by the LLM for this billboard' },
+              { value: 'random',     label: 'RND',        title: 'Pick a random style each time' },
+              { value: 'dissolve',   label: 'DSLV',       title: 'Dissolve — slow, cinematic fade-in' },
+              { value: 'fly-in',     label: 'FLY',        title: 'Fly-in — columns sweep from right' },
+              { value: 'sparkle',    label: 'SPKL',       title: 'Sparkle — dots flicker in randomly' },
+              { value: 'typewriter', label: 'TYPE',       title: 'Typewriter — rows revealed top to bottom' },
+              { value: 'exploding',  label: 'EXPL',       title: 'Exploding — burst outward from centre' },
+              { value: 'tetris',     label: 'TETR',       title: 'Tetris — columns drop in left to right' },
+            ]
             rows.push(
               <div
                 key={`edit-${item.id}`}
@@ -502,6 +522,41 @@ export function BillboardList({
                   flexShrink: 0,
                 }}
               >
+                {/* Entrance style picker */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontFamily: mono, fontSize: `${xs * 0.85}px`, color: '#555555', letterSpacing: 1 }}>
+                    ENTRANCE
+                  </label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                    {entranceOptions.map(opt => {
+                      const isActive = draftEntrance === opt.value
+                      return (
+                        <button
+                          key={opt.value}
+                          onClick={() => setDraftEntrance(opt.value)}
+                          title={opt.title}
+                          style={{
+                            background: isActive ? '#1a2a3a' : 'transparent',
+                            border: `1px solid ${isActive ? '#336699' : '#333333'}`,
+                            color: isActive ? '#6699cc' : '#555555',
+                            fontFamily: mono,
+                            fontSize: `${xs * 0.8}px`,
+                            cursor: 'pointer',
+                            padding: '1px 5px',
+                            borderRadius: 2,
+                            letterSpacing: 1,
+                            transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                          }}
+                          onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = '#888888' }}
+                          onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
+                        >
+                          {opt.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
                 {draftTexts.map((text, i) => (
                   <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <label

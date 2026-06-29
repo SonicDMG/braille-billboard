@@ -15,6 +15,8 @@ import {
   dissolveEntranceFrames,
   sparkleEntranceFrames,
   typewriterEntranceFrames,
+  explodingEntranceFrames,
+  tetrisEntranceFrames,
   type AlphaMap,
   type SegmentBounds,
   type EntranceOptions,
@@ -665,6 +667,8 @@ function makeEntranceGenerator(
     case 'fly-in':     return flyInEntranceFrames(opts)
     case 'sparkle':    return sparkleEntranceFrames(opts)
     case 'typewriter': return typewriterEntranceFrames(opts)
+    case 'exploding':  return explodingEntranceFrames(opts)
+    case 'tetris':     return tetrisEntranceFrames(opts)
     case 'dissolve':
     default:           return dissolveEntranceFrames(opts)
   }

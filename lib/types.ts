@@ -1,6 +1,6 @@
 export type ChartType = 'line' | 'bar' | 'sparkline' | 'text'
 
-export type EntranceStyle = 'fly-in' | 'dissolve' | 'sparkle' | 'typewriter'
+export type EntranceStyle = 'fly-in' | 'dissolve' | 'sparkle' | 'typewriter' | 'exploding' | 'tetris' | 'random'
 
 export interface DataPoint {
   label: string

@@ -13,7 +13,7 @@ import type { BillboardSegmentSprite, EntranceStyle, VisualizationData } from '@
 import { spriteDataToMap } from '@/lib/image-to-sprite'
 import { billboardConfig } from '@/billboard.config'
 
-const ENTRANCE_STYLES: EntranceStyle[] = ['fly-in', 'dissolve', 'sparkle', 'typewriter']
+const ENTRANCE_STYLES: EntranceStyle[] = ['fly-in', 'dissolve', 'sparkle', 'typewriter', 'exploding', 'tetris']
 
 function randomEntranceStyle(): EntranceStyle {
   return ENTRANCE_STYLES[Math.floor(Math.random() * ENTRANCE_STYLES.length)]!
@@ -58,7 +58,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const [encodeProgress, setEncodeProgress] = useState<number | null>(null)
 
   // Stable entrance style for the current displaying phase.
-  const fallbackEntranceRef = useRef<EntranceStyle>('dissolve')
+  const fallbackEntranceRef = useRef<EntranceStyle>(randomEntranceStyle())
   const lastPhaseRef = useRef<string>('')
   const currentPhase = phase.phase
   if (currentPhase === 'transitioning' && lastPhaseRef.current !== 'transitioning') {
@@ -228,10 +228,14 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const activeData = activeItem?.data ?? phaseData
 
   const dotSegments = activeData?.segments ?? phaseData?.segments
+  // Prefer the live item's stored entranceStyle (kept up-to-date by edits) over the
+  // phase payload, which is frozen at transition time and won't reflect a user change.
   const dotEntranceStyle =
-    phase.phase === 'displaying' ? (phase.data.entranceStyle ?? fallbackEntranceRef.current) :
-    phase.phase === 'transitioning' ? (phase.next.entranceStyle ?? fallbackEntranceRef.current) :
-    undefined
+    (phase.phase === 'displaying' || phase.phase === 'transitioning')
+      ? (activeData?.entranceStyle === 'random' || activeData?.entranceStyle == null
+          ? fallbackEntranceRef.current
+          : activeData.entranceStyle)
+      : undefined
   const dotText =
     phase.phase === 'error' ? 'ERROR' :
     (!dotSegments && activeData) ? (activeData.words ?? activeData.summary) :

@@ -1,7 +1,7 @@
 import type { VisualizationData, ChartType, DataPoint, BillboardSegmentText, DotColor, EntranceStyle } from './types'
 
 const CHART_TYPES: ChartType[] = ['line', 'bar', 'sparkline', 'text']
-const VALID_ENTRANCE_STYLES = new Set<string>(['fly-in', 'dissolve', 'sparkle', 'typewriter'])
+const VALID_ENTRANCE_STYLES = new Set<string>(['fly-in', 'dissolve', 'sparkle', 'typewriter', 'exploding', 'tetris'])
 const MAX_DATA_POINTS = 24
 
 // Word budget — mirrors the hard caps in the LLM prompt.
