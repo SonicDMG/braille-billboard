@@ -213,19 +213,32 @@ function buildLines(
     const charDotW = (CHAR_W + GAP) * scale
     const charsPerRow = Math.max(1, Math.floor((colDotWidth + GAP * scale) / charDotW))
 
-    const words = seg.text.toUpperCase().split(/\s+/).filter(Boolean)
+    // Split on explicit newlines first so the author can force line breaks.
+    // Each newline-delimited chunk is then independently word-wrapped.
+    const hardLines = seg.text.toUpperCase().split(/\r?\n/)
     let current = ''
 
-    for (const word of words) {
-      const w = word.slice(0, charsPerRow)
-      if (current === '') {
-        current = w
-      } else if (current.length + 1 + w.length <= charsPerRow) {
-        current += ' ' + w
-      } else {
-        lines.push({ text: current, color: seg.color, scale })
-        current = w
+    for (const hardLine of hardLines) {
+      // A blank hard line (empty or whitespace-only) acts as an explicit line break.
+      if (!hardLine.trim()) {
+        if (current) { lines.push({ text: current, color: seg.color, scale }); current = '' }
+        lines.push({ text: '', color: seg.color, scale })
+        continue
       }
+      const words = hardLine.split(/\s+/).filter(Boolean)
+      for (const word of words) {
+        const w = word.slice(0, charsPerRow)
+        if (current === '') {
+          current = w
+        } else if (current.length + 1 + w.length <= charsPerRow) {
+          current += ' ' + w
+        } else {
+          lines.push({ text: current, color: seg.color, scale })
+          current = w
+        }
+      }
+      // Flush at the end of each hard line — the next hard line starts fresh.
+      if (current) { lines.push({ text: current, color: seg.color, scale }); current = '' }
     }
     if (current) lines.push({ text: current, color: seg.color, scale })
 
