@@ -42,7 +42,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   // Layout state machine
   const [layout, setLayout] = useState<Layout>('splash')
 
-  const { phase, activeIndex, items, activeGroupKey, submitManualQuery, addItem, deleteItem, jumpTo, setActiveGroup, lastManualChatIdRef, setItemSprite, removeItemSprite } = useCycle({
+  const { phase, activeIndex, items, activeGroupKey, submitManualQuery, addItem, deleteItem, jumpTo, setActiveGroup, lastManualChatIdRef, setItemSprite, removeItemSprite, setItemIncluded } = useCycle({
     dwellSeconds: billboardConfig.dwellSeconds,
     resumeAfterManualSeconds: billboardConfig.resumeAfterManualSeconds,
   })
@@ -115,6 +115,10 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const handleRemoveSprite = useCallback((id: string) => {
     removeItemSprite(id)
   }, [removeItemSprite])
+
+  const handleToggleIncluded = useCallback((id: string, included: boolean) => {
+    setItemIncluded(id, included)
+  }, [setItemIncluded])
 
   if (missingEnvVars.length > 0) {
     return <SetupScreen missingVars={missingEnvVars} fontSize={fontSize} />
@@ -228,6 +232,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
               onDelete={handleDeleteItem}
               onUploadSprite={handleUploadSprite}
               onRemoveSprite={handleRemoveSprite}
+              onToggleIncluded={handleToggleIncluded}
               onDownloadGif={(id) => {
                 const item = items.find(it => it.id === id)
                 const slug = item?.query.slice(0, 40).replace(/[^a-z0-9]+/gi, '-').toLowerCase() ?? 'billboard'

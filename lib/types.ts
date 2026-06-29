@@ -153,6 +153,12 @@ export interface BillboardItem {
    * Items with the same filterKey are grouped together in the billboard list.
    */
   filterKey: string
+  /**
+   * Whether this item participates in auto-cycling and ← → navigation.
+   * Defaults to true for all new items. When false the item remains visible
+   * in the list but is skipped by the cycle.
+   */
+  included: boolean
 }
 
 export type BillboardPhase =

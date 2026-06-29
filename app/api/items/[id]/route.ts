@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { deleteItem, updateItemSprite } from '@/lib/db'
+import { deleteItem, updateItemSprite, updateItemIncluded } from '@/lib/db'
 import { deleteConversation } from '@/lib/openrag'
 import type { SpriteData } from '@/lib/types'
 
@@ -19,13 +19,18 @@ export async function PATCH(
 ) {
   const { id } = await params
   let spriteData: SpriteData | null = null
+  let included: boolean | undefined
   try {
-    const body = await req.json() as { spriteData?: unknown }
+    const body = await req.json() as { spriteData?: unknown; included?: unknown }
     if (body.spriteData && typeof body.spriteData === 'object' && !Array.isArray(body.spriteData)) {
       spriteData = body.spriteData as SpriteData
     }
-  } catch { /* no body — treat as null (clear) */ }
+    if (typeof body.included === 'boolean') {
+      included = body.included
+    }
+  } catch { /* no body — no-op */ }
 
+  if (included !== undefined) updateItemIncluded(id, included)
   updateItemSprite(id, spriteData)
   return Response.json({ ok: true })
 }

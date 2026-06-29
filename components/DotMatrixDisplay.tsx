@@ -654,6 +654,27 @@ export interface DotMatrixDisplayHandle {
    * @param filename  Suggested download filename (default: "billboard.gif")
    */
   captureGif(filename?: string): void
+
+  /**
+   * Render a sequence of billboard items as a single animated GIF.
+   * Each item plays its entrance animation, holds for ~1 second, then the
+   * next item begins. Triggers a file download when encoding is complete.
+   *
+   * @param items     Ordered array of items to include.
+   * @param filename  Suggested download filename (default: "presentation.gif")
+   * @param onProgress  Optional callback: called with (completedItems, totalItems)
+   *                    after each item is fully encoded.
+   */
+  capturePlaylistGif(
+    items: Array<{
+      segments?: BillboardSegmentText[]
+      text?: string
+      entranceStyle?: EntranceStyle
+      imageSeg?: BillboardSegmentSprite | BillboardSegmentPortrait
+    }>,
+    filename?: string,
+    onProgress?: (done: number, total: number) => void,
+  ): void
 }
 
 export const DotMatrixDisplay = forwardRef<DotMatrixDisplayHandle, DotMatrixDisplayProps>(
@@ -1275,6 +1296,145 @@ function DotMatrixDisplay({ segments, text = '', loading = false, streamEnergy =
         gif.render()
       }).catch(err => {
         console.error('[captureGif] Failed to encode GIF:', err)
+      })
+    },
+
+    capturePlaylistGif(items, filename = 'presentation.gif', onProgress) {
+      const canvas = canvasRef.current
+      const d = dimsRef.current
+      if (!canvas || !d || items.length === 0) return
+
+      import('gif.js').then(({ default: GIF }) => {
+        const gif = new GIF({
+          workers: 2,
+          quality: 8,
+          width: d.w,
+          height: d.h,
+          workerScript: '/gif.worker.js',
+          background: '#000000',
+        })
+
+        const scratch = document.createElement('canvas')
+        scratch.width = d.w
+        scratch.height = d.h
+        const ctx = scratch.getContext('2d')!
+
+        const FRAME_DELAY = 30  // ms per frame
+
+        function renderFrameToGif(litMap: Map<string, LitDot>, alphaSnapshot: AlphaMap, cols: number, rows: number, dotPx: number) {
+          const STEP = dotPx + GAP_PX
+          ctx.clearRect(0, 0, d!.w, d!.h)
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              const cx = c * STEP + dotPx / 2
+              const cy = r * STEP + dotPx / 2
+              const litDot = litMap.get(`${r},${c}`)
+              ctx.beginPath()
+              ctx.arc(cx, cy, dotPx / 2, 0, Math.PI * 2)
+              if (litDot) {
+                const entranceAlpha = alphaSnapshot.get(`${r},${c}`) ?? 1
+                if (entranceAlpha <= 0) {
+                  ctx.fillStyle = DOT_DIM
+                } else {
+                  const rgb = resolveColor(litDot.color, c, cols, litDot.segMinCol, litDot.segMaxCol)
+                  ctx.fillStyle = entranceAlpha >= 1
+                    ? rgbToCss(rgb)
+                    : rgbToGlowCss(rgb, entranceAlpha)
+                }
+              } else {
+                ctx.fillStyle = DOT_DIM
+              }
+              ctx.fill()
+            }
+          }
+          gif.addFrame(ctx, { copy: true, delay: FRAME_DELAY })
+        }
+
+        for (let itemIdx = 0; itemIdx < items.length; itemIdx++) {
+          const item = items[itemIdx]!
+          const effectiveSegments: BillboardSegmentText[] =
+            item.segments && item.segments.length > 0
+              ? item.segments
+              : item.text
+                ? [{ text: item.text, color: { type: 'solid', hex: '#ff6600' } }]
+                : []
+
+          if (effectiveSegments.length === 0 && !item.imageSeg) continue
+
+          const style = item.entranceStyle ?? 'dissolve'
+          const imgSeg = item.imageSeg
+
+          const dotPx = computeDotPx(d.w, d.h, effectiveSegments, imgSeg)
+          const STEP = dotPx + GAP_PX
+          const cols = Math.floor((d.w + GAP_PX) / STEP)
+          const rows = Math.floor((d.h + GAP_PX) / STEP)
+          if (cols <= 0 || rows <= 0) continue
+
+          const litMap = buildLitMap(effectiveSegments, cols, rows, imgSeg)
+          const litKeys = new Set(litMap.keys())
+          const alphaMap: AlphaMap = new Map()
+          for (const key of litKeys) alphaMap.set(key, 0)
+
+          const bounds = buildSegmentBounds(effectiveSegments, cols, rows, !!imgSeg)
+
+          // Render the entrance animation for this item
+          if (bounds.length === 0) {
+            for (const key of litKeys) alphaMap.set(key, 1)
+            renderFrameToGif(litMap, alphaMap, cols, rows, dotPx)
+          } else {
+            for (let si = 0; si < bounds.length; si++) {
+              const bound = bounds[si]!
+              const gen = makeEntranceGenerator(style, { cols, rows, litKeys, bounds: bound })
+              let done = false
+              while (!done) {
+                const result = gen.next()
+                if (result.done) break
+                const frame = result.value
+                for (const [key, a] of frame) alphaMap.set(key, a)
+                renderFrameToGif(litMap, alphaMap, cols, rows, dotPx)
+
+                let total = 0
+                let settled = 0
+                for (const key of litKeys) {
+                  const r = parseInt(key.split(',')[0]!, 10)
+                  if (r >= bound.minRow && r <= bound.maxRow) {
+                    total++
+                    if ((alphaMap.get(key) ?? 1) >= 0.99) settled++
+                  }
+                }
+                if (total > 0 && settled / total >= 0.7) {
+                  for (const key of litKeys) {
+                    const r = parseInt(key.split(',')[0]!, 10)
+                    if (r >= bound.minRow && r <= bound.maxRow) alphaMap.set(key, 1)
+                  }
+                  done = true
+                }
+              }
+            }
+
+            // Snap fully lit, render final frame, then hold ~1s (33 frames × 30ms)
+            for (const key of litKeys) alphaMap.set(key, 1)
+            renderFrameToGif(litMap, alphaMap, cols, rows, dotPx)
+            for (let i = 0; i < 33; i++) {
+              gif.addFrame(ctx, { copy: true, delay: FRAME_DELAY })
+            }
+          }
+
+          onProgress?.(itemIdx + 1, items.length)
+        }
+
+        gif.on('finished', (blob: Blob) => {
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = filename
+          a.click()
+          setTimeout(() => URL.revokeObjectURL(url), 60_000)
+        })
+
+        gif.render()
+      }).catch(err => {
+        console.error('[capturePlaylistGif] Failed to encode GIF:', err)
       })
     },
   }))

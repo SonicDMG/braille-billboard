@@ -13,6 +13,9 @@ interface BillboardListProps {
   onRemoveSprite: (id: string) => void
   onDownloadGif: (id: string) => void
   onSetGroup: (key: string | null) => void
+  onToggleIncluded: (id: string, included: boolean) => void
+  onExportPresentationGif: () => void
+  exportingPresentation: boolean
   fontSize: number
 }
 
@@ -32,6 +35,9 @@ export function BillboardList({
   onRemoveSprite,
   onDownloadGif,
   onSetGroup,
+  onToggleIncluded,
+  onExportPresentationGif,
+  exportingPresentation,
   fontSize,
 }: BillboardListProps) {
   const sm = fontSize * 0.65
@@ -96,15 +102,62 @@ export function BillboardList({
       {/* Header row */}
       <div
         style={{
-          fontFamily: mono,
-          fontSize: `${xs}px`,
-          color: '#555555',
-          letterSpacing: 2,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
           paddingBottom: 4,
           flexShrink: 0,
         }}
       >
-        BILLBOARD — {items.length} ITEM{items.length !== 1 ? 'S' : ''}
+        <span
+          style={{
+            fontFamily: mono,
+            fontSize: `${xs}px`,
+            color: '#555555',
+            letterSpacing: 2,
+          }}
+        >
+          BILLBOARD — {items.length} ITEM{items.length !== 1 ? 'S' : ''}
+        </span>
+
+        {/* Bulk inclusion toggle */}
+        {(() => {
+          const allIncluded = items.every(it => it.included)
+          const allExcluded = items.every(it => !it.included)
+          const label = allIncluded ? 'EXCL ALL' : 'INCL ALL'
+          const nextState = allIncluded ? false : true
+          return (
+            <button
+              onClick={() => items.forEach(it => onToggleIncluded(it.id, nextState))}
+              title={allIncluded ? 'Exclude all from cycle' : allExcluded ? 'Include all in cycle' : 'Include all in cycle'}
+              style={{
+                background: 'none',
+                border: `1px solid #2a2a2a`,
+                color: allExcluded ? '#666666' : '#444444',
+                fontFamily: mono,
+                fontSize: `${xs * 0.85}px`,
+                cursor: 'pointer',
+                padding: '1px 5px',
+                borderRadius: 2,
+                letterSpacing: 1,
+                flexShrink: 0,
+                transition: 'color 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={e => {
+                const btn = e.currentTarget as HTMLButtonElement
+                btn.style.color = '#aaaaaa'
+                btn.style.borderColor = '#444444'
+              }}
+              onMouseLeave={e => {
+                const btn = e.currentTarget as HTMLButtonElement
+                btn.style.color = allExcluded ? '#666666' : '#444444'
+                btn.style.borderColor = '#2a2a2a'
+              }}
+            >
+              {label}
+            </button>
+          )
+        })()}
       </div>
 
       {/* Group selector — only shown when there are multiple groups */}
@@ -205,6 +258,7 @@ export function BillboardList({
           const isActive = idx === activeIndex % items.length
           const isHovered = hoveredIdx === idx
           const hasSprite = item.spriteData != null
+          const isIncluded = item.included
           rows.push(
             <div
               key={item.id}
@@ -219,11 +273,34 @@ export function BillboardList({
                 border: `1px solid ${isActive ? '#4a4a4a' : '#2a2a2a'}`,
                 borderRadius: 2,
                 background: isActive ? '#111111' : 'transparent',
-                transition: 'background 0.3s, border-color 0.3s',
+                opacity: isIncluded ? 1 : 0.35,
+                transition: 'background 0.3s, border-color 0.3s, opacity 0.2s',
                 flexShrink: 0,
                 cursor: isActive ? 'default' : 'pointer',
               }}
             >
+              {/* Inclusion toggle — always visible on every row */}
+              <button
+                onClick={e => { e.stopPropagation(); onToggleIncluded(item.id, !isIncluded) }}
+                title={isIncluded ? 'Exclude from cycle' : 'Include in cycle'}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isIncluded ? '#666666' : '#333333',
+                  fontFamily: mono,
+                  fontSize: `${xs}px`,
+                  cursor: 'pointer',
+                  padding: '0 2px',
+                  flexShrink: 0,
+                  lineHeight: 1,
+                  transition: 'color 0.15s',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = isIncluded ? '#999999' : '#666666' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = isIncluded ? '#666666' : '#333333' }}
+              >
+                {isIncluded ? '⠶' : '⠠'}
+              </button>
+
               {/* Active indicator */}
               <span
                 style={{

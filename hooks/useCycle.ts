@@ -41,6 +41,7 @@ type CycleAction =
   | { type: 'JUMP_TO'; index: number }
   | { type: 'ITEM_SPRITE_SET'; id: string; spriteData: SpriteData | null }
   | { type: 'SET_GROUP'; key: string | null }
+  | { type: 'ITEM_INCLUSION_SET'; id: string; included: boolean }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Group-aware helpers
@@ -51,9 +52,10 @@ type CycleAction =
  * When groupKey is null, all indices are included.
  */
 function groupIndices(items: BillboardItem[], groupKey: string | null): number[] {
-  if (groupKey === null) return items.map((_, i) => i)
   return items.reduce<number[]>((acc, item, i) => {
-    if (item.filterKey === groupKey) acc.push(i)
+    if (!item.included) return acc
+    if (groupKey !== null && item.filterKey !== groupKey) return acc
+    acc.push(i)
     return acc
   }, [])
 }
@@ -259,6 +261,13 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       return { ...state, items }
     }
 
+    case 'ITEM_INCLUSION_SET': {
+      const items = state.items.map(it =>
+        it.id === action.id ? { ...it, included: action.included } : it
+      )
+      return { ...state, items }
+    }
+
     case 'SET_GROUP': {
       // Switching group — find the first item in the new group (or keep current if in group).
       const key = action.key
@@ -337,6 +346,7 @@ export function useCycle({
             ...it,
             spriteData: it.spriteData ?? null,
             filterKey: it.filterKey ?? '',
+            included: it.included ?? true,
           }))
           for (const item of items) {
             cacheRef.current.set(item.query.trim().toLowerCase(), {
@@ -512,7 +522,7 @@ export function useCycle({
   const addItem = useCallback((query: string, chatId: string | null, data: VisualizationData, audioB64: string | null) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     const filterKey = extractFilterKey(query)
-    const item: BillboardItem = { id, query, chatId, data, audioB64, spriteData: null, filterKey }
+    const item: BillboardItem = { id, query, chatId, data, audioB64, spriteData: null, filterKey, included: true }
     dispatch({ type: 'ITEM_ADDED', item })
     // If we were idle, start cycling immediately
     dispatch({ type: 'START_NEXT' })
@@ -520,7 +530,7 @@ export function useCycle({
     void fetch('/api/items', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, query, chatId, data, audioB64, filterKey }),
+      body: JSON.stringify({ id, query, chatId, data, audioB64, filterKey, included: true }),
     })
   }, [])
 
@@ -595,6 +605,18 @@ export function useCycle({
     })
   }, [])
 
+  /**
+   * Toggle an item's inclusion in the cycle and persist the change.
+   */
+  const setItemIncluded = useCallback((id: string, included: boolean) => {
+    dispatch({ type: 'ITEM_INCLUSION_SET', id, included })
+    void fetch(`/api/items/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ included }),
+    })
+  }, [])
+
   return {
     phase: state.phase,
     activeIndex: state.activeIndex,
@@ -608,5 +630,6 @@ export function useCycle({
     lastManualChatIdRef,
     setItemSprite,
     removeItemSprite,
+    setItemIncluded,
   }
 }
