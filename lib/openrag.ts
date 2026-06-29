@@ -160,8 +160,10 @@ export interface ResolvedFilter {
  */
 export async function resolveFilterMention(name: string): Promise<ResolvedFilter | null> {
   const client = getClient()
-  const filters = await client.knowledgeFilters.search(name)
-  const match = filters.find(f => f.name.toLowerCase() === name.toLowerCase())
+  // Normalise hyphens used in the @token back to spaces for filter name lookup
+  const normalisedName = name.replace(/-/g, ' ')
+  const filters = await client.knowledgeFilters.search(normalisedName)
+  const match = filters.find(f => f.name.toLowerCase() === normalisedName.toLowerCase())
   if (!match) return null
 
   // Fetch the full filter to get queryData constraints

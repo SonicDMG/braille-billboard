@@ -53,8 +53,9 @@ function getActiveMention(value: string, cursorPos: number): string | null {
 function applyMention(value: string, cursorPos: number, filterName: string): { newValue: string; newCursor: number } {
   const before = value.slice(0, cursorPos)
   const after = value.slice(cursorPos)
-  // Replace the partial @token with the completed name
-  const newBefore = before.replace(/@[\w-]*$/, `@${filterName} `)
+  // Normalise spaces to hyphens so the token stays a single [\w-]+ word
+  const token = filterName.replace(/ /g, '-')
+  const newBefore = before.replace(/@[\w-]*$/, `@${token} `)
   return { newValue: newBefore + after, newCursor: newBefore.length }
 }
 
@@ -67,19 +68,27 @@ function applyMention(value: string, cursorPos: number, filterName: string): { n
 function autocorrectMention(query: string, filters: FilterSummary[]): string {
   return query.replace(/@([\w-]+)/g, (token, name: string) => {
     const lower = name.toLowerCase()
-    // Exact match — leave as-is
-    if (filters.some(f => f.name.toLowerCase() === lower)) return token
+    // Normalise hyphens back to spaces for matching against filter names
+    const lowerSpaced = lower.replace(/-/g, ' ')
+    // Exact match (hyphen-normalised) — leave as-is (keep hyphens for the API)
+    if (filters.some(f => f.name.toLowerCase() === lower || f.name.toLowerCase() === lowerSpaced)) return token
     // Prefix match — pick shortest name that starts with the typed text
-    const prefixMatches = filters.filter(f => f.name.toLowerCase().startsWith(lower))
+    const prefixMatches = filters.filter(f => {
+      const fn = f.name.toLowerCase()
+      return fn.startsWith(lower) || fn.startsWith(lowerSpaced)
+    })
     if (prefixMatches.length > 0) {
       const best = prefixMatches.sort((a, b) => a.name.length - b.name.length)[0]!
-      return `@${best.name}`
+      return `@${best.name.replace(/ /g, '-')}`
     }
     // Substring match — pick shortest name containing the typed text
-    const subMatches = filters.filter(f => f.name.toLowerCase().includes(lower))
+    const subMatches = filters.filter(f => {
+      const fn = f.name.toLowerCase()
+      return fn.includes(lower) || fn.includes(lowerSpaced)
+    })
     if (subMatches.length > 0) {
       const best = subMatches.sort((a, b) => a.name.length - b.name.length)[0]!
-      return `@${best.name}`
+      return `@${best.name.replace(/ /g, '-')}`
     }
     // No match — strip the token so the query runs without a filter
     return ''
