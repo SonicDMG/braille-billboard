@@ -612,7 +612,9 @@ export function useCycle({
    * a billboard grid; the actual placement is handled by computeSpriteRegion.
    */
   const setItemSprite = useCallback(async (id: string, file: File) => {
-    const SPRITE_COLS = 40
+    // Sample at 200 dot-columns so the stored sprite is always downscaled (never
+    // upscaled) to fit the actual image region, preserving maximum detail.
+    const SPRITE_COLS = 200
     try {
       const spriteMap = await imageToSprite(file, SPRITE_COLS, { maskBackground: true })
       const spriteData = spriteMapToData(spriteMap)

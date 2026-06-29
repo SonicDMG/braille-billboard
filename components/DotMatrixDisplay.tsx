@@ -423,14 +423,60 @@ function buildSpriteDots(
 
   if (dstCols <= 0 || dstRows <= 0) return new Map()
 
-  // Build destination pixel array by nearest-neighbour sampling
+  // Build destination pixel array.
+  // When downscaling (scale < 1) use area-averaging: accumulate all source pixels
+  // that map into each destination dot and blend their colours.  This avoids the
+  // aliasing and pixel-skip artefacts of pure nearest-neighbour at low resolutions.
+  // When upscaling (scale >= 1) nearest-neighbour is sufficient.
   const dst = new Map<string, string>()
-  for (let dr = 0; dr < dstRows; dr++) {
-    for (let dc = 0; dc < dstCols; dc++) {
-      const sr = Math.min(srcRows - 1, Math.floor(dr / scale))
-      const sc = Math.min(srcCols - 1, Math.floor(dc / scale))
-      const hex = spriteMap.get(`${sr},${sc}`)
-      if (hex) dst.set(`${dr},${dc}`, hex)
+  if (scale >= 1) {
+    // Upscaling — nearest-neighbour
+    for (let dr = 0; dr < dstRows; dr++) {
+      for (let dc = 0; dc < dstCols; dc++) {
+        const sr = Math.min(srcRows - 1, Math.floor(dr / scale))
+        const sc = Math.min(srcCols - 1, Math.floor(dc / scale))
+        const hex = spriteMap.get(`${sr},${sc}`)
+        if (hex) dst.set(`${dr},${dc}`, hex)
+      }
+    }
+  } else {
+    // Downscaling — area-average over the source region that maps to each dst dot
+    for (let dr = 0; dr < dstRows; dr++) {
+      for (let dc = 0; dc < dstCols; dc++) {
+        // Source region in fractional coordinates
+        const srStart = dr / scale
+        const srEnd   = (dr + 1) / scale
+        const scStart = dc / scale
+        const scEnd   = (dc + 1) / scale
+
+        let rSum = 0, gSum = 0, bSum = 0, weight = 0
+
+        const rMin = Math.floor(srStart)
+        const rMax = Math.min(srcRows - 1, Math.ceil(srEnd) - 1)
+        const cMin = Math.floor(scStart)
+        const cMax = Math.min(srcCols - 1, Math.ceil(scEnd) - 1)
+
+        for (let sr = rMin; sr <= rMax; sr++) {
+          const rw = Math.min(sr + 1, srEnd) - Math.max(sr, srStart)
+          for (let sc = cMin; sc <= cMax; sc++) {
+            const cw = Math.min(sc + 1, scEnd) - Math.max(sc, scStart)
+            const hex = spriteMap.get(`${sr},${sc}`)
+            if (!hex) continue  // unlit source dot — skip (treat as off)
+            const [ri, gi, bi] = hexToRgb(hex)
+            const w = rw * cw
+            rSum += ri * w; gSum += gi * w; bSum += bi * w; weight += w
+          }
+        }
+
+        if (weight > 0) {
+          // Only emit a lit dot if the covered area is at least half lit
+          const totalArea = (srEnd - srStart) * (scEnd - scStart)
+          if (weight / totalArea >= 0.5) {
+            const avg: RGB = [Math.round(rSum / weight), Math.round(gSum / weight), Math.round(bSum / weight)]
+            dst.set(`${dr},${dc}`, '#' + avg.map(v => v.toString(16).padStart(2, '0')).join(''))
+          }
+        }
+      }
     }
   }
 
