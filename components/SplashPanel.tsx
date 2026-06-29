@@ -252,37 +252,12 @@ export function SplashPanel({
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        padding: mode === 'split' ? `${fontSize * 0.75}px ${fontSize * 0.5}px` : `${fontSize * 2}px ${fontSize}px`,
+        padding: mode === 'split' ? `${fontSize * 0.5}px ${fontSize * 0.5}px` : `${fontSize * 0.5}px ${fontSize}px`,
         boxSizing: 'border-box',
         overflow: 'hidden',
         transition: 'padding 0.55s',
       }}
     >
-      {/* Collapse ↔ expand button */}
-      {showCollapseBtn && (
-        <button
-          onClick={onToggleCollapse}
-          title="Expand to full screen"
-          style={{
-            position: 'absolute',
-            top: fontSize * 0.75,
-            right: fontSize * 0.5,
-            background: 'none',
-            border: '1px solid #2a2a2a',
-            color: '#444444',
-            fontFamily: mono,
-            fontSize: `${fontSize}px`,
-            cursor: 'pointer',
-            padding: '1px 5px',
-            borderRadius: 2,
-            zIndex: 10,
-            lineHeight: 1,
-          }}
-        >
-          ⠿›
-        </button>
-      )}
-
       {/* Query input */}
       {showInput && (
         <form

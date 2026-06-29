@@ -31,12 +31,13 @@ export type ItemRow = {
   id: string;
   query: string;
   chat_id: string | null;
-  data_json: string;         // JSON-serialised VisualizationData
+  data_json: string;            // JSON-serialised VisualizationData
   audio_b64: string | null;
-  sprite_data: string | null; // JSON-serialised SpriteData, or NULL
-  filter_key: string | null;  // @mention group key, or NULL for unfiltered
-  included: number;           // 1 = included in cycle, 0 = excluded
-  created_at: number;        // ms since epoch
+  sprite_data: string | null;   // JSON-serialised SpriteData, or NULL
+  filter_key: string | null;    // @mention group key, or NULL for unfiltered
+  included: number;             // legacy — kept for migration safety, not used by new code
+  playlist_order: number | null; // NULL = not in playlist; integer = presentation order (0-based)
+  created_at: number;           // ms since epoch
 };
 
 // The deserialised form returned to callers.
@@ -48,7 +49,8 @@ export type PersistedItem = {
   audioB64: string | null;
   spriteData: SpriteData | null;
   filterKey: string;
-  included: boolean;
+  included: boolean;            // legacy — kept for type compat, not used by cycle logic
+  playlistOrder: number | null; // null = not in playlist
   createdAt: number;
 };
 
@@ -91,6 +93,31 @@ function getDb(): Database.Database {
   if (!cols.some((c) => c.name === "included")) {
     conn.exec("ALTER TABLE items ADD COLUMN included INTEGER NOT NULL DEFAULT 1");
   }
+  if (!cols.some((c) => c.name === "playlist_order")) {
+    conn.exec("ALTER TABLE items ADD COLUMN playlist_order INTEGER");
+  }
+  // Backfill playlist_order for items that pre-date the playlist feature.
+  // If the column just appeared (or exists but every row is NULL), seed them
+  // all in created_at order so existing users don't lose their cycle history.
+  const unordered = conn
+    .prepare("SELECT COUNT(*) as cnt FROM items WHERE playlist_order IS NULL")
+    .get() as { cnt: number };
+  const ordered = conn
+    .prepare("SELECT COUNT(*) as cnt FROM items WHERE playlist_order IS NOT NULL")
+    .get() as { cnt: number };
+  if (unordered.cnt > 0 && ordered.cnt === 0) {
+    // No items have a playlist_order yet — seed them all in created_at order.
+    const allIds = conn
+      .prepare("SELECT id FROM items ORDER BY created_at ASC")
+      .all() as { id: string }[];
+    const setOrder = conn.prepare("UPDATE items SET playlist_order = ? WHERE id = ?");
+    const backfillOrder = conn.transaction(() => {
+      for (let i = 0; i < allIds.length; i++) {
+        setOrder.run(i, allIds[i]!.id);
+      }
+    });
+    backfillOrder();
+  }
   // Backfill any rows where filter_key is still NULL — covers both the initial
   // migration and rows inserted before the backfill ran (e.g. column existed
   // but app hadn't restarted yet).
@@ -125,6 +152,7 @@ function rowToItem(row: ItemRow): PersistedItem {
     spriteData: row.sprite_data ? (JSON.parse(row.sprite_data) as SpriteData) : null,
     filterKey: row.filter_key ?? '',
     included: row.included !== 0,
+    playlistOrder: row.playlist_order ?? null,
     createdAt: row.created_at,
   };
 }
@@ -150,11 +178,12 @@ export function insertItem(item: {
   audioB64: string | null;
   filterKey: string;
   included?: boolean;
+  playlistOrder?: number | null;
 }): void {
   getDb()
     .prepare(
-      `INSERT OR IGNORE INTO items (id, query, chat_id, data_json, audio_b64, sprite_data, filter_key, included, created_at)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO items (id, query, chat_id, data_json, audio_b64, sprite_data, filter_key, included, playlist_order, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
     )
     .run(
       item.id,
@@ -164,17 +193,63 @@ export function insertItem(item: {
       item.audioB64,
       item.filterKey || null,
       item.included !== false ? 1 : 0,
+      item.playlistOrder ?? null,
       Date.now(),
     );
 }
 
 /**
  * Update the included state for an existing item.
+ * @deprecated — kept for the PATCH /api/items/[id] route; playlist_order supersedes this.
  */
 export function updateItemIncluded(id: string, included: boolean): void {
   getDb()
     .prepare("UPDATE items SET included = ? WHERE id = ?")
     .run(included ? 1 : 0, id);
+}
+
+/**
+ * Set or clear an item's playlist_order.
+ * Pass null to remove the item from the playlist.
+ */
+export function updatePlaylistOrder(id: string, order: number | null): void {
+  getDb()
+    .prepare("UPDATE items SET playlist_order = ? WHERE id = ?")
+    .run(order, id);
+}
+
+/**
+ * Atomically reset all playlist_order values.
+ * Each id in orderedIds receives its 0-based index as playlist_order.
+ * Any item NOT in orderedIds gets playlist_order = NULL.
+ */
+export function reorderPlaylist(orderedIds: string[]): void {
+  const db = getDb();
+  const setOrder = db.prepare("UPDATE items SET playlist_order = ? WHERE id = ?");
+  const clearOrder = db.prepare("UPDATE items SET playlist_order = NULL WHERE id NOT IN (SELECT id FROM items WHERE id = ?)");
+
+  // Use a transaction for atomicity
+  const run = db.transaction(() => {
+    // Clear all first, then set in order
+    db.prepare("UPDATE items SET playlist_order = NULL").run();
+    for (let i = 0; i < orderedIds.length; i++) {
+      setOrder.run(i, orderedIds[i]!);
+    }
+  });
+  run();
+  // Suppress unused-variable warning — clearOrder prepared but logic replaced by simpler approach above
+  void clearOrder;
+}
+
+/**
+ * Return the current max playlist_order value, or -1 when the playlist is empty.
+ * Used by POST /api/playlist to append new items at the end.
+ */
+export function maxPlaylistOrder(): number {
+  const row = getDb()
+    .prepare("SELECT MAX(playlist_order) as max_order FROM items WHERE playlist_order IS NOT NULL")
+    .get() as { max_order: number | null };
+  return row.max_order ?? -1;
 }
 
 /**

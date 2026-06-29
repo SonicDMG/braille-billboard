@@ -153,12 +153,13 @@ export interface BillboardItem {
    * Items with the same filterKey are grouped together in the billboard list.
    */
   filterKey: string
-  /**
-   * Whether this item participates in auto-cycling and ← → navigation.
-   * Defaults to true for all new items. When false the item remains visible
-   * in the list but is skipped by the cycle.
-   */
+  /** @deprecated — superseded by playlistOrder; kept for DB migration compat. */
   included: boolean
+  /**
+   * Position of this item in the presentation playlist (0-based).
+   * null means the item is in history only and will not auto-cycle.
+   */
+  playlistOrder: number | null
 }
 
 export type BillboardPhase =
