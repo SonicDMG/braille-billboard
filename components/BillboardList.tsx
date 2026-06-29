@@ -204,9 +204,10 @@ export function BillboardList({
       {(() => {
         const rows: React.ReactNode[] = []
         const seenKeys = new Set<string>()
-        const visibleItems = activeGroupKey !== null
+        const visibleItems = (activeGroupKey !== null
           ? items.map((item, idx) => ({ item, idx })).filter(({ item }) => item.filterKey === activeGroupKey)
           : items.map((item, idx) => ({ item, idx }))
+        ).sort((a, b) => groupKeys.indexOf(a.item.filterKey) - groupKeys.indexOf(b.item.filterKey))
 
         visibleItems.forEach(({ item, idx }) => {
           // Insert a group label the first time each key is seen (only when multiple groups)
