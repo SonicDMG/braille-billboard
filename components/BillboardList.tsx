@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState, useEffect } from 'react'
-import type { BillboardItem } from '@/lib/types'
+import type { BillboardItem, BillboardSegmentText, VisualizationData } from '@/lib/types'
 
 interface BillboardListProps {
   items: BillboardItem[]
@@ -15,6 +15,7 @@ interface BillboardListProps {
   onSetGroup: (key: string | null) => void
   onAddToPlaylist: (id: string) => void
   onRemoveFromPlaylist: (id: string) => void
+  onUpdateItem: (id: string, data: VisualizationData) => void
   fontSize: number
 }
 
@@ -22,6 +23,16 @@ interface BillboardListProps {
 function groupLabel(key: string): string {
   if (key === '') return 'unfiltered'
   return key.split('|').map(k => `@${k}`).join(' ')
+}
+
+/** Returns up to 3 editable text strings from segments (or a single legacy words/summary). */
+function getSegmentTexts(item: BillboardItem): string[] {
+  if (item.data.segments && item.data.segments.length > 0) {
+    return item.data.segments.map(s => s.text)
+  }
+  // Legacy: single text field
+  const fallback = item.data.words ?? item.data.summary ?? ''
+  return [fallback]
 }
 
 export function BillboardList({
@@ -36,6 +47,7 @@ export function BillboardList({
   onSetGroup,
   onAddToPlaylist,
   onRemoveFromPlaylist,
+  onUpdateItem,
   fontSize,
 }: BillboardListProps) {
   const sm = fontSize * 0.65
@@ -44,6 +56,11 @@ export function BillboardList({
   // "Selected" row in the Query tab — drives which item shows sprite controls.
   // Defaults to the active (playing) item; follows it when it changes externally.
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // Inline segment editor state: null = closed, string = id of the item being edited
+  const [editingId, setEditingId] = useState<string | null>(null)
+  // Draft segment texts while editing (up to 3)
+  const [draftTexts, setDraftTexts] = useState<string[]>([])
 
   // Keep selectedId tracking the active item when it changes due to auto-cycle.
   const prevActiveIndexRef = useRef(activeIndex)
@@ -87,7 +104,38 @@ export function BillboardList({
 
   const handleRowClick = (idx: number, id: string) => {
     setSelectedId(id)
+    // Close editor if clicking a different row
+    if (id !== editingId) setEditingId(null)
     onSelect(idx)
+  }
+
+  const openEditor = (item: BillboardItem) => {
+    setEditingId(item.id)
+    setDraftTexts(getSegmentTexts(item))
+  }
+
+  const closeEditor = () => {
+    setEditingId(null)
+    setDraftTexts([])
+  }
+
+  const commitEdit = (item: BillboardItem) => {
+    if (draftTexts.every(t => t === '') || draftTexts.length === 0) return
+    let newData = { ...item.data }
+    if (item.data.segments && item.data.segments.length > 0) {
+      // Update segment texts, preserving colors
+      const newSegments: BillboardSegmentText[] = item.data.segments.map((seg, i) => ({
+        ...seg,
+        text: draftTexts[i] ?? seg.text,
+      }))
+      newData = { ...newData, segments: newSegments }
+    } else {
+      // Legacy: update words and summary with the single draft text
+      const text = draftTexts[0] ?? ''
+      newData = { ...newData, words: text, summary: text }
+    }
+    onUpdateItem(item.id, newData)
+    closeEditor()
   }
 
   // Derive unique groups in order of first appearance
@@ -356,6 +404,32 @@ export function BillboardList({
                   >
                     ⇩
                   </button>
+
+                  {/* Edit text sections */}
+                  <button
+                    onClick={e => {
+                      e.stopPropagation()
+                      if (editingId === item.id) closeEditor()
+                      else openEditor(item)
+                    }}
+                    title={editingId === item.id ? 'Close text editor' : 'Edit text sections'}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: editingId === item.id ? '#6699cc' : '#555555',
+                      fontFamily: mono,
+                      fontSize: `${xs}px`,
+                      cursor: 'pointer',
+                      padding: '0 2px',
+                      flexShrink: 0,
+                      lineHeight: 1,
+                      transition: 'color 0.15s',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#88aadd' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = editingId === item.id ? '#6699cc' : '#555555' }}
+                  >
+                    ✎
+                  </button>
                 </>
               )}
 
@@ -408,6 +482,109 @@ export function BillboardList({
               </button>
             </div>
           )
+
+          // Inline editor — shown below the selected row when ✎ is active
+          if (editingId === item.id) {
+            const segLabels = ['Section 1', 'Section 2', 'Section 3']
+            rows.push(
+              <div
+                key={`edit-${item.id}`}
+                onClick={e => e.stopPropagation()}
+                style={{
+                  background: '#0d0d0d',
+                  border: '1px solid #333333',
+                  borderTop: 'none',
+                  borderRadius: '0 0 2px 2px',
+                  padding: '8px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  flexShrink: 0,
+                }}
+              >
+                {draftTexts.map((text, i) => (
+                  <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <label
+                      style={{
+                        fontFamily: mono,
+                        fontSize: `${xs * 0.85}px`,
+                        color: '#555555',
+                        letterSpacing: 1,
+                      }}
+                    >
+                      {segLabels[i] ?? `Section ${i + 1}`}
+                    </label>
+                    <textarea
+                      value={text}
+                      onChange={e => {
+                        const next = [...draftTexts]
+                        next[i] = e.target.value
+                        setDraftTexts(next)
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                          e.preventDefault()
+                          commitEdit(item)
+                        }
+                        if (e.key === 'Escape') {
+                          e.preventDefault()
+                          closeEditor()
+                        }
+                      }}
+                      rows={2}
+                      style={{
+                        background: '#111111',
+                        border: '1px solid #333333',
+                        color: '#cccccc',
+                        fontFamily: mono,
+                        fontSize: `${xs}px`,
+                        padding: '4px 6px',
+                        resize: 'vertical',
+                        borderRadius: 2,
+                        outline: 'none',
+                        width: '100%',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+                ))}
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 2 }}>
+                  <button
+                    onClick={() => closeEditor()}
+                    style={{
+                      background: 'none',
+                      border: '1px solid #333333',
+                      color: '#555555',
+                      fontFamily: mono,
+                      fontSize: `${xs * 0.85}px`,
+                      cursor: 'pointer',
+                      padding: '2px 8px',
+                      borderRadius: 2,
+                      letterSpacing: 1,
+                    }}
+                  >
+                    CANCEL
+                  </button>
+                  <button
+                    onClick={() => commitEdit(item)}
+                    style={{
+                      background: '#1a2a1a',
+                      border: '1px solid #336633',
+                      color: '#66aa66',
+                      fontFamily: mono,
+                      fontSize: `${xs * 0.85}px`,
+                      cursor: 'pointer',
+                      padding: '2px 8px',
+                      borderRadius: 2,
+                      letterSpacing: 1,
+                    }}
+                  >
+                    SAVE
+                  </button>
+                </div>
+              </div>
+            )
+          }
         })
 
         return rows

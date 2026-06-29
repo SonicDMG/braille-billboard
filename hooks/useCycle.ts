@@ -40,6 +40,7 @@ type CycleAction =
   | { type: 'ITEM_DELETED'; id: string }
   | { type: 'JUMP_TO'; index: number }
   | { type: 'ITEM_SPRITE_SET'; id: string; spriteData: SpriteData | null }
+  | { type: 'ITEM_DATA_UPDATED'; id: string; data: VisualizationData }
   | { type: 'SET_GROUP'; key: string | null }
   | { type: 'ITEM_INCLUSION_SET'; id: string; included: boolean }  // legacy — kept for PATCH route compat
   | { type: 'PLAYLIST_SET'; id: string; playlistOrder: number | null }
@@ -260,6 +261,22 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       const items = state.items.map(it =>
         it.id === action.id ? { ...it, spriteData: action.spriteData } : it
       )
+      return { ...state, items }
+    }
+
+    case 'ITEM_DATA_UPDATED': {
+      const items = state.items.map(it =>
+        it.id === action.id ? { ...it, data: action.data } : it
+      )
+      // If the active phase is displaying this item, update it live.
+      const activeItem = items[state.activeIndex]
+      if (activeItem?.id === action.id && phase.phase === 'displaying') {
+        return {
+          ...state,
+          items,
+          phase: { ...phase, data: action.data },
+        }
+      }
       return { ...state, items }
     }
 
@@ -623,6 +640,18 @@ export function useCycle({
   }, [])
 
   /**
+   * Update the VisualizationData for an item (e.g. user-edited segments) and persist.
+   */
+  const updateItemData = useCallback((id: string, data: VisualizationData) => {
+    dispatch({ type: 'ITEM_DATA_UPDATED', id, data })
+    void fetch(`/api/items/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data }),
+    })
+  }, [])
+
+  /**
    * Toggle an item's inclusion in the cycle and persist the change.
    * @deprecated — superseded by addToPlaylist/removeFromPlaylist; kept for PATCH route compat.
    */
@@ -686,6 +715,7 @@ export function useCycle({
     lastManualChatIdRef,
     setItemSprite,
     removeItemSprite,
+    updateItemData,
     setItemIncluded,
     addToPlaylist,
     removeFromPlaylist,

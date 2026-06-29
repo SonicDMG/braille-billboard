@@ -253,6 +253,16 @@ export function maxPlaylistOrder(): number {
 }
 
 /**
+ * Update (replace) the data_json for an existing item.
+ * Used when the user edits billboard text segments directly.
+ */
+export function updateItemData(id: string, data: VisualizationData): void {
+  getDb()
+    .prepare("UPDATE items SET data_json = ? WHERE id = ?")
+    .run(JSON.stringify(data), id);
+}
+
+/**
  * Update (replace) the sprite_data for an existing item.
  * Passing null clears the sprite.
  */

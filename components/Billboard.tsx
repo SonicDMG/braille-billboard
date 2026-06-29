@@ -9,7 +9,7 @@ import { SetupScreen } from './SetupScreen'
 import { BillboardList } from './BillboardList'
 import { useCycle } from '@/hooks/useCycle'
 import { useBrailleResize } from '@/hooks/useBrailleResize'
-import type { BillboardSegmentSprite, EntranceStyle } from '@/lib/types'
+import type { BillboardSegmentSprite, EntranceStyle, VisualizationData } from '@/lib/types'
 import { spriteDataToMap } from '@/lib/image-to-sprite'
 import { billboardConfig } from '@/billboard.config'
 
@@ -45,7 +45,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const {
     phase, activeIndex, items, activeGroupKey,
     submitManualQuery, addItem, deleteItem, jumpTo, setActiveGroup,
-    lastManualChatIdRef, setItemSprite, removeItemSprite,
+    lastManualChatIdRef, setItemSprite, removeItemSprite, updateItemData,
     addToPlaylist, removeFromPlaylist, reorderPlaylistItems,
   } = useCycle({
     dwellSeconds: billboardConfig.dwellSeconds,
@@ -122,6 +122,10 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const handleRemoveSprite = useCallback((id: string) => {
     removeItemSprite(id)
   }, [removeItemSprite])
+
+  const handleUpdateItem = useCallback((id: string, data: VisualizationData) => {
+    updateItemData(id, data)
+  }, [updateItemData])
 
   // Playlist reorder helpers — derive ordered playlist ids, swap adjacent items
   const playlistItems = useMemo(
@@ -286,6 +290,7 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
               onDelete={handleDeleteItem}
               onUploadSprite={handleUploadSprite}
               onRemoveSprite={handleRemoveSprite}
+              onUpdateItem={handleUpdateItem}
               onAddToPlaylist={addToPlaylist}
               onRemoveFromPlaylist={removeFromPlaylist}
               onDownloadGif={(id) => {
