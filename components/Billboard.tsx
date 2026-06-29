@@ -214,25 +214,28 @@ export function Billboard({ missingEnvVars }: BillboardProps) {
   const streamEnergy = tokenCount > 0 ? 1 - Math.exp(-tokenCount / 120) : 0
 
   const isLoadingPhase = phase.phase === 'loading' || phase.phase === 'manual'
-  const dotSegments =
-    phase.phase === 'displaying' ? phase.data.segments :
-    phase.phase === 'transitioning' ? phase.next.segments :
+
+  // The active item's stored data is always kept up-to-date by ITEM_DATA_UPDATED,
+  // so prefer it for segments/text so that user edits are reflected immediately
+  // regardless of the current phase (displaying, loading, transitioning).
+  // Fall back to the phase payload for items that haven't been persisted yet
+  // (e.g. a brand-new query still transitioning for the first time).
+  const activeItem = items[activeIndex]
+  const phaseData =
+    phase.phase === 'displaying' ? phase.data :
+    phase.phase === 'transitioning' ? phase.next :
     undefined
+  const activeData = activeItem?.data ?? phaseData
+
+  const dotSegments = activeData?.segments ?? phaseData?.segments
   const dotEntranceStyle =
     phase.phase === 'displaying' ? (phase.data.entranceStyle ?? fallbackEntranceRef.current) :
     phase.phase === 'transitioning' ? (phase.next.entranceStyle ?? fallbackEntranceRef.current) :
     undefined
   const dotText =
     phase.phase === 'error' ? 'ERROR' :
-    (!dotSegments && phase.phase === 'displaying') ? (phase.data.words ?? phase.data.summary) :
-    (!dotSegments && phase.phase === 'transitioning') ? (phase.next.words ?? phase.next.summary) :
+    (!dotSegments && activeData) ? (activeData.words ?? activeData.summary) :
     ''
-
-  const activeItem = items[activeIndex]
-  const activeData =
-    phase.phase === 'displaying' ? phase.data :
-    phase.phase === 'transitioning' ? phase.next :
-    activeItem?.data
 
   const activeSpriteData = activeItem?.spriteData ?? activeData?.generatedSpriteData ?? null
   const spriteMap = useMemo(

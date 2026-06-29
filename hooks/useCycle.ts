@@ -268,13 +268,15 @@ function reducer(state: CycleState, action: CycleAction): CycleState {
       const items = state.items.map(it =>
         it.id === action.id ? { ...it, data: action.data } : it
       )
-      // If the active phase is displaying this item, update it live.
+      // Patch the live phase whenever the active item's data changes so the
+      // billboard reflects edits immediately, regardless of the current phase.
       const activeItem = items[state.activeIndex]
-      if (activeItem?.id === action.id && phase.phase === 'displaying') {
-        return {
-          ...state,
-          items,
-          phase: { ...phase, data: action.data },
+      if (activeItem?.id === action.id) {
+        if (phase.phase === 'displaying') {
+          return { ...state, items, phase: { ...phase, data: action.data } }
+        }
+        if (phase.phase === 'transitioning') {
+          return { ...state, items, phase: { ...phase, next: action.data } }
         }
       }
       return { ...state, items }
