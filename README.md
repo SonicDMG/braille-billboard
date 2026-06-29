@@ -4,7 +4,7 @@
 
 ![Braille Billboard in action](public/gifs/billboard-demo.gif)
 
-Braille Billboard is a Next.js app that connects to an [OpenRAG](https://github.com/SonicDMG/openrag) knowledge base, queries it with natural language, and renders the result as an animated braille dot-matrix billboard ⠿ — complete with entrance animations (fly-in, dissolve, sparkle, typewriter), AI-generated sprites, and one-click GIF export.
+Braille Billboard is a Next.js app that connects to an [OpenRAG](https://github.com/langflow-ai/openrag) knowledge base, queries it with natural language, and renders the result as an animated braille dot-matrix billboard ⠿ — complete with entrance animations (fly-in, dissolve, sparkle, typewriter), AI-generated sprites, and one-click GIF export.
 
 ---
 
@@ -13,7 +13,7 @@ Braille Billboard is a Next.js app that connects to an [OpenRAG](https://github.
 | Requirement | Notes |
 |---|---|
 | Node.js 18+ | `node -v` to check |
-| An OpenRAG instance | [Install guide](https://github.com/SonicDMG/openrag) |
+| An OpenRAG instance | [Install guide](https://docs.openr.ag/quickstart) |
 
 ---
 
@@ -66,13 +66,13 @@ npm run dev
 Every character on the billboard is a real Unicode Braille cell (U+2800–U+28FF). Each cell packs an 8-dot grid into a single code point — 2 columns × 4 rows. The app ships a custom [`BrailleCanvas`](lib/braille.ts) engine that treats those cells as pixels: set a dot, clear a dot, run a Bresenham line, word-wrap text. The full-screen wave on the splash panel, the entrance animations, and the billboard copy are all just braille characters updating at 20 fps.
 
 ### ⠐ OpenRAG
-[OpenRAG](https://github.com/SonicDMG/openrag) is the RAG backend that powers every query. It ingests your documents, indexes them, and exposes a streaming chat API. Braille Billboard sends a carefully crafted prompt that tells the LLM to respond as a billboard copywriter — punchy headline, one-sentence summary, bold tagline — and streams the JSON back token by token. Type `@filtername` in the query box to scope a question to a specific document source.
+[OpenRAG](https://github.com/langflow-ai/openrag) is the RAG backend that powers every query. It ingests your documents, indexes them, and exposes a streaming chat API. Braille Billboard sends a carefully crafted prompt that tells the LLM to respond as a billboard copywriter — punchy headline, one-sentence summary, bold tagline — and streams the JSON back token by token. Type `@filtername` in the query box to scope a question to a specific document source.
 
 ### ⠨ EverArt
 [EverArt](https://everart.ai) generates the portrait image that appears beside each billboard answer. After the LLM responds, the app fires a `txt2img` request using the `visualDescription` field the LLM wrote for the subject. The resulting PNG is sampled pixel-by-pixel server-side, background-masked, and converted to a `SpriteData` map — a `"y,x" → "#rrggbb"` object the dot-matrix renderer repaints as colored braille dots. No EVERART_API_KEY, no sprites — everything else still works.
 
 ### ⠸ Bob
-This app was built with [Bob](https://www.ibm.com/products/watsonx-code-assistant) — IBM's AI coding assistant. Bob planned the architecture, wrote the braille rendering engine, wired up the streaming pipeline, and authored every component from scratch. The `AGENTS.md` and `CLAUDE.md` files in the repo carry the agent rules Bob followed throughout development.
+This app was built with [Bob](https://bob.ibm.com/) — IBM's AI coding assistant. Bob planned the architecture, wrote the braille rendering engine, wired up the streaming pipeline, and authored every component from scratch. The `AGENTS.md` and `CLAUDE.md` files in the repo carry the agent rules Bob followed throughout development.
 
 ### ⠰ Next.js + SQLite
 The frontend and API routes run in [Next.js](https://nextjs.org) 16. Query history is persisted locally in a [SQLite](https://www.sqlite.org) database via [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) — no external database required. GIF export is handled entirely in the browser using [`gif.js`](https://jnordberg.github.io/gif.js/) with a Web Worker, so recorded animations never touch the server.
